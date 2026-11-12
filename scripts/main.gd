@@ -100,40 +100,43 @@ func _build_isometric_grid():
 	
 	meadow_container = Node2D.new()
 	meadow_container.name = "MeadowGround"
+	meadow_container.z_index = 0
 	world_container.add_child(meadow_container)
 	world_container.move_child(meadow_container, 0)
+	
+	plots_root.z_index = 10
 	
 	var origin_x = 0.0
 	var origin_y = -60.0
 	var empty_style = StyleBoxEmpty.new()
-	var s = (ISO_W / 256.0) * 1.004 # 0.4% bleed prevents subpixel gap seams
+	var s = (ISO_W / 256.0) * 1.002 # Tight seamless 2:1 fit
 	
-	# 1. Build surrounding continuous meadow (16x16 field)
-	for my in range(-6, 10):
-		for mx in range(-6, 10):
-			if mx >= 0 and mx <= 3 and my >= 0 and my <= 3:
-				continue
-				
+	# 1. Build continuous 20x20 meadow landscape
+	var meadow_min = -8
+	var meadow_max = 11
+	
+	for my in range(meadow_min, meadow_max + 1):
+		for mx in range(meadow_min, meadow_max + 1):
 			var m_iso_x = origin_x + (mx - my) * (ISO_W * 0.5)
 			var m_iso_y = origin_y + (mx + my) * (ISO_H * 0.5)
 			
 			var spr = Sprite2D.new()
 			spr.position = Vector2(m_iso_x, m_iso_y)
 			spr.scale = Vector2(s, s)
-			spr.z_index = -50
+			spr.z_index = 0
 			
 			# Weighted natural distribution across the 8 grass variants
 			var h = abs((mx * 73856093) ^ (my * 19349663) ^ (mx * my * 83492791)) % 100
 			var g_idx = 0
-			if h < 45:
-				g_idx = 0 # Plain olive lawn
-			elif h < 68:
+			if h < 42:
+				g_idx = 0 # Classic lawn with subtle blades
+			elif h < 66:
 				g_idx = 1 # Grass blade tufts
-			elif h < 78:
+			elif h < 76:
 				g_idx = 2 # Golden buttercups
-			elif h < 86:
+			elif h < 84:
 				g_idx = 3 # Clover clusters
-			elif h < 92:
+			elif h < 91:
 				g_idx = 4 # White wild daisies
 			elif h < 95:
 				g_idx = 5 # Dandelion puffs
@@ -150,7 +153,7 @@ func _build_isometric_grid():
 		var gx = i % 4
 		var gy = i / 4
 		
-		# 2:1 Isometric formula
+		# 2:1 Isometric formula matching the meadow
 		var iso_x = origin_x + (gx - gy) * (ISO_W * 0.5)
 		var iso_y = origin_y + (gx + gy) * (ISO_H * 0.5)
 		
@@ -158,30 +161,6 @@ func _build_isometric_grid():
 		node.name = "Plot_%d" % i
 		node.position = Vector2(iso_x, iso_y)
 		node.z_index = gx + gy # Natural isometric Y-sorting
-		
-		# Layer 0: Seamless 2:1 Grass Diamond (Base of every cell)
-		var grass_sprite = Sprite2D.new()
-		grass_sprite.name = "Grass"
-		var farm_h = abs((gx * 73856093) ^ (gy * 19349663) ^ (gx * gy * 83492791)) % 100
-		var g_idx = 0
-		if farm_h < 40:
-			g_idx = 0
-		elif farm_h < 65:
-			g_idx = 1
-		elif farm_h < 75:
-			g_idx = 2
-		elif farm_h < 85:
-			g_idx = 3
-		elif farm_h < 92:
-			g_idx = 4
-		elif farm_h < 96:
-			g_idx = 5
-		else:
-			g_idx = 6
-		grass_sprite.texture = tex_grass[g_idx]
-		grass_sprite.scale = Vector2(s, s)
-		grass_sprite.position = Vector2.ZERO
-		node.add_child(grass_sprite)
 		
 		# Layer 1: Flat Furrowed Soil Diamond (Plowed FarmVille rows)
 		var soil_sprite = Sprite2D.new()
