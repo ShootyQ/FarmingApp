@@ -1,26 +1,38 @@
 extends Control
 
-# FarmingApp: Layered Meadow Grid & 1970s UI Controller
+# FarmingApp: Authentic 2:1 Isometric FarmVille Engine
 
-@onready var coins_label = $Margin/VBox/TopBar/Resources/Coins
-@onready var wood_label = $Margin/VBox/TopBar/Resources/Wood
-@onready var stone_label = $Margin/VBox/TopBar/Resources/Stone
-@onready var relics_label = $Margin/VBox/TopBar/Resources/Relics
-@onready var sector_title = $Margin/VBox/TopBar/SectorInfo/SectorTitle
-@onready var status_banner = $Margin/VBox/StatusBanner
+const ISO_W = 160.0
+const ISO_H = 80.0
 
-@onready var tile_grid = $Margin/VBox/GridContainer
-@onready var seed_bar = $Margin/VBox/BottomControls/SeedBar
-@onready var tool_btn = $Margin/VBox/BottomControls/ToolUpgradeBtn
-@onready var map_modal = $MapModal
-@onready var map_grid = $MapModal/Panel/VBox/MapGrid
+@onready var world_container = $WorldViewport/World
+@onready var plots_root = $WorldViewport/World/Plots
+@onready var camera = $WorldViewport/World/Camera2D
 
-var grass_textures: Array[Texture2D] = []
-var tile_controls: Array[Control] = []
+@onready var coins_label = $HUD/Margin/VBox/TopBar/Resources/Coins
+@onready var wood_label = $HUD/Margin/VBox/TopBar/Resources/Wood
+@onready var stone_label = $HUD/Margin/VBox/TopBar/Resources/Stone
+@onready var relics_label = $HUD/Margin/VBox/TopBar/Resources/Relics
+@onready var sector_title = $HUD/Margin/VBox/TopBar/SectorInfo/SectorTitle
+@onready var status_banner = $HUD/Margin/VBox/StatusBanner
+
+@onready var seed_bar = $HUD/Margin/VBox/BottomControls/SeedBar
+@onready var tool_btn = $HUD/Margin/VBox/BottomControls/ToolUpgradeBtn
+@onready var map_modal = $HUD/MapModal
+@onready var map_grid = $HUD/MapModal/Panel/VBox/MapGrid
+
+var iso_grass_tex = preload("res://assets/tiles/iso_grass.png")
+var iso_soil_tex = preload("res://assets/tiles/iso_soil.png")
+
+var plot_nodes: Array[Node2D] = []
+
+# Camera drag state
+var is_dragging: bool = false
+var drag_start_mouse: Vector2 = Vector2.ZERO
+var drag_start_cam: Vector2 = Vector2.ZERO
 
 func _ready():
-	_load_grass_textures()
-	_setup_grid_cells()
+	_build_isometric_grid()
 	_setup_seed_buttons()
 	_setup_map_buttons()
 	
@@ -29,8 +41,8 @@ func _ready():
 	GameState.message_broadcast.connect(_show_message)
 	
 	tool_btn.pressed.connect(_on_tool_upgrade_pressed)
-	$Margin/VBox/TopBar/SectorInfo/MapBtn.pressed.connect(func(): map_modal.visible = true)
-	$MapModal/Panel/VBox/CloseMapBtn.pressed.connect(func(): map_modal.visible = false)
+	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.pressed.connect(func(): map_modal.visible = true)
+	$HUD/MapModal/Panel/VBox/CloseMapBtn.pressed.connect(func(): map_modal.visible = false)
 	
 	_select_crop("wheat")
 	_refresh_ui()
@@ -39,69 +51,79 @@ func _process(_delta: float):
 	GameState.update_crop_timers()
 	_update_active_crop_labels()
 
-func _load_grass_textures():
-	grass_textures.clear()
-	for i in range(8):
-		var path = "res://assets/tiles/grass_%d.png" % i
-		if ResourceLoader.exists(path):
-			grass_textures.append(load(path))
+func _unhandled_input(event: InputEvent):
+	# Pan with mouse drag or touch
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				is_dragging = true
+				drag_start_mouse = get_viewport().get_mouse_position()
+				drag_start_cam = camera.position
+			else:
+				is_dragging = false
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			camera.zoom = clamp(camera.zoom * 1.1, Vector2(0.6, 0.6), Vector2(2.0, 2.0))
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			camera.zoom = clamp(camera.zoom * 0.9, Vector2(0.6, 0.6), Vector2(2.0, 2.0))
+			
+	elif event is InputEventMouseMotion and is_dragging:
+		var current_mouse = get_viewport().get_mouse_position()
+		var diff = (drag_start_mouse - current_mouse) / camera.zoom
+		camera.position = drag_start_cam + diff
 
-func _get_grass_for_cell(idx: int) -> Texture2D:
-	if grass_textures.is_empty():
-		return null
-	# Organic pseudo-random variation per tile
-	var seed_val = (idx * 3 + (idx / 4) * 5) % grass_textures.size()
-	return grass_textures[seed_val]
-
-func _setup_grid_cells():
-	tile_controls.clear()
-	for child in tile_grid.get_children():
+func _build_isometric_grid():
+	plot_nodes.clear()
+	for child in plots_root.get_children():
 		child.queue_free()
 	
+	# 4x4 isometric diamond grid
+	var origin_x = 0.0
+	var origin_y = -120.0
+	
 	for i in range(16):
-		var cell_root = Control.new()
-		cell_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		cell_root.mouse_filter = Control.MOUSE_FILTER_PASS
+		var gx = i % 4
+		var gy = i / 4
 		
-		# Layer 0: Grass Meadow Background
-		var grass_tex = TextureRect.new()
-		grass_tex.name = "GrassBG"
-		grass_tex.texture = _get_grass_for_cell(i)
-		grass_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		grass_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		grass_tex.set_anchors_preset(Control.PRESET_FULL_RECT)
-		grass_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cell_root.add_child(grass_tex)
+		# 2:1 Isometric formula
+		var iso_x = origin_x + (gx - gy) * (ISO_W * 0.5)
+		var iso_y = origin_y + (gx + gy) * (ISO_H * 0.5)
 		
-		# Layer 1: Tilled Soil Bed (Only visible if tilled soil)
-		var soil_bed = ColorRect.new()
-		soil_bed.name = "SoilBed"
-		soil_bed.color = Color(0.24, 0.16, 0.11, 0.90) # Rich dark umber loam
-		soil_bed.set_anchors_preset(Control.PRESET_FULL_RECT)
-		soil_bed.offset_left = 6
-		soil_bed.offset_top = 6
-		soil_bed.offset_right = -6
-		soil_bed.offset_bottom = -6
-		soil_bed.visible = false
-		soil_bed.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cell_root.add_child(soil_bed)
+		var node = Node2D.new()
+		node.name = "Plot_%d" % i
+		node.position = Vector2(iso_x, iso_y)
+		node.z_index = gx + gy # Y-sort depth
 		
-		# Layer 2: Interactive Touch Button & Badge
-		var btn = Button.new()
-		btn.name = "CellButton"
-		btn.set_anchors_preset(Control.PRESET_FULL_RECT)
-		btn.flat = true
-		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		btn.clip_text = false
-		btn.add_theme_font_size_override("font_size", 15)
+		# Layer 0: Grass Diamond
+		var grass_sprite = Sprite2D.new()
+		grass_sprite.name = "Grass"
+		grass_sprite.texture = iso_grass_tex
+		grass_sprite.scale = Vector2(ISO_W / 512.0, ISO_H / 256.0)
+		node.add_child(grass_sprite)
+		
+		# Layer 1: Furrowed Soil Diamond (FarmVille plowed rows)
+		var soil_sprite = Sprite2D.new()
+		soil_sprite.name = "Soil"
+		soil_sprite.texture = iso_soil_tex
+		soil_sprite.scale = Vector2(ISO_W / 512.0, ISO_H / 256.0)
+		soil_sprite.visible = false
+		node.add_child(soil_sprite)
+		
+		# Layer 2: Interactive Touch Area & Badge
+		var touch_btn = Button.new()
+		touch_btn.name = "TouchBtn"
+		touch_btn.flat = true
+		touch_btn.custom_minimum_size = Vector2(ISO_W, ISO_H)
+		touch_btn.position = Vector2(-ISO_W * 0.5, -ISO_H * 0.5)
+		touch_btn.clip_text = false
+		touch_btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		touch_btn.add_theme_font_size_override("font_size", 13)
 		
 		var idx = i
-		btn.pressed.connect(func(): _on_tile_clicked(idx))
-		cell_root.add_child(btn)
+		touch_btn.pressed.connect(func(): _on_plot_clicked(idx))
+		node.add_child(touch_btn)
 		
-		tile_grid.add_child(cell_root)
-		tile_controls.append(cell_root)
+		plots_root.add_child(node)
+		plot_nodes.append(node)
 
 func _setup_seed_buttons():
 	for child in seed_bar.get_children():
@@ -144,9 +166,9 @@ func _select_crop(crop_id: String):
 	var c = GameData.CROPS[crop_id]
 	_show_message("Selected seed: %s (Cost: %dc)" % [c["name"], c["cost"]], false)
 
-func _on_tile_clicked(idx: int):
+func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
-	_render_cell(idx)
+	_render_plot(idx)
 
 func _on_tool_upgrade_pressed():
 	if GameState.can_upgrade_tool():
@@ -184,7 +206,7 @@ func _refresh_ui():
 	relics_label.text = "Relics: %d" % GameState.relics
 	
 	var s_info = GameData.SECTORS.get(GameState.current_sector_coord, {})
-	sector_title.text = "%s (%s)" % [s_info.get("name", "Meadow"), GameState.current_sector_coord]
+	sector_title.text = "%s (%s)" % [s_info.get("name", "Farm"), GameState.current_sector_coord]
 	
 	var cur_tool = GameState.get_tool_info()
 	if GameState.tool_tier < GameData.TOOL_TIERS.size() - 1:
@@ -194,20 +216,20 @@ func _refresh_ui():
 		tool_btn.text = "%s\n(Max Tier)" % cur_tool["name"]
 	
 	for i in range(16):
-		_render_cell(i)
+		_render_plot(i)
 	
 	_refresh_map_grid()
 
-func _render_cell(idx: int):
-	if idx >= tile_controls.size():
+func _render_plot(idx: int):
+	if idx >= plot_nodes.size():
 		return
-	var cell = tile_controls[idx]
-	var soil_bed = cell.get_node("SoilBed") as ColorRect
-	var btn = cell.get_node("CellButton") as Button
+	var node = plot_nodes[idx]
+	var soil_sprite = node.get_node("Soil") as Sprite2D
+	var btn = node.get_node("TouchBtn") as Button
 	
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
 	if idx >= tiles.size():
-		soil_bed.visible = false
+		soil_sprite.visible = false
 		btn.text = ""
 		return
 	
@@ -216,41 +238,38 @@ func _render_cell(idx: int):
 	
 	match type:
 		"grass":
-			# Pure clean meadow grass! No soil bed.
-			soil_bed.visible = false
-			btn.text = "" # Clean meadow, tap to till
+			soil_sprite.visible = false
+			btn.text = ""
 			btn.modulate = Color.WHITE
 		
 		"obstacle":
-			# Obstacle sits directly on top of the grass meadow
-			soil_bed.visible = false
+			soil_sprite.visible = false
 			var obs = GameData.OBSTACLES[tile["obstacle_id"]]
 			btn.text = "[%s]\n%d taps" % [obs["name"], tile["taps_left"]]
 			if obs["required_tool_tier"] > GameState.tool_tier:
-				btn.modulate = Color(1.0, 0.45, 0.45) # Warning red
+				btn.modulate = Color(1.0, 0.45, 0.45)
 			else:
-				btn.modulate = Color(1.0, 0.95, 0.75) # Warm parchment
+				btn.modulate = Color(1.0, 0.95, 0.75)
 		
 		"soil":
-			# Tilled soil bed overlays the grass
-			soil_bed.visible = true
+			soil_sprite.visible = true
 			var state = tile.get("state", "empty")
 			if state == "empty":
-				btn.text = "Tilled Soil\n[Plant %s]" % GameState.selected_crop.capitalize()
-				btn.modulate = Color(0.9, 0.85, 0.75)
+				btn.text = "[Plant %s]" % GameState.selected_crop.capitalize()
+				btn.modulate = Color(1.0, 0.95, 0.8)
 			elif state == "ready":
 				var crop = GameData.CROPS[tile["crop"]]
 				var is_mut = tile.get("is_mutated", false)
 				if is_mut:
 					btn.text = "**%s**\nHARVEST! (+%dc)" % [crop["mutated_name"].to_upper(), crop["mutated_reward"]]
-					btn.modulate = Color(1.0, 0.88, 0.2) # Radiant gold
+					btn.modulate = Color(1.0, 0.88, 0.2)
 				else:
 					btn.text = "%s\nHARVEST! (+%dc)" % [crop["name"].to_upper(), crop["reward"]]
-					btn.modulate = Color(1.0, 1.0, 0.5) # Ripe yellow
+					btn.modulate = Color(1.0, 1.0, 0.4)
 			elif state == "growing":
 				var crop = GameData.CROPS[tile["crop"]]
 				btn.text = "%s (Growing)" % crop["name"]
-				btn.modulate = Color(0.7, 0.95, 0.7)
+				btn.modulate = Color(0.8, 1.0, 0.8)
 
 func _update_active_crop_labels():
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
@@ -261,12 +280,12 @@ func _update_active_crop_labels():
 			var crop = GameData.CROPS[tile["crop"]]
 			var elapsed = now - tile.get("plant_time", now)
 			var remain = max(0.0, tile.get("grow_duration", 0.0) - elapsed)
-			var btn = tile_controls[i].get_node("CellButton") as Button
+			var btn = plot_nodes[i].get_node("TouchBtn") as Button
 			if remain > 0:
 				btn.text = "%s\n%ds left" % [crop["name"], ceil(remain)]
 			else:
 				tile["state"] = "ready"
-				_render_cell(i)
+				_render_plot(i)
 
 func _refresh_map_grid():
 	var idx = 0
@@ -293,7 +312,7 @@ func _refresh_map_grid():
 
 func _on_tile_updated(coord: String, tile_idx: int):
 	if coord == GameState.current_sector_coord:
-		_render_cell(tile_idx)
+		_render_plot(tile_idx)
 
 func _show_message(text: String, is_reward: bool):
 	status_banner.text = text
