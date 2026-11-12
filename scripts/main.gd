@@ -26,7 +26,11 @@ var tex_grass = [
 	preload("res://assets/tiles/iso_grass_0.png"),
 	preload("res://assets/tiles/iso_grass_1.png"),
 	preload("res://assets/tiles/iso_grass_2.png"),
-	preload("res://assets/tiles/iso_grass_3.png")
+	preload("res://assets/tiles/iso_grass_3.png"),
+	preload("res://assets/tiles/iso_grass_4.png"),
+	preload("res://assets/tiles/iso_grass_5.png"),
+	preload("res://assets/tiles/iso_grass_6.png"),
+	preload("res://assets/tiles/iso_grass_7.png")
 ]
 var tex_soil = preload("res://assets/tiles/iso_soil_flat.png")
 
@@ -40,6 +44,7 @@ var tex_boulder = preload("res://assets/objects/boulder.png")
 var tex_weed = preload("res://assets/objects/weed.png")
 
 var plot_nodes: Array[Node2D] = []
+var meadow_container: Node2D = null
 
 # Camera drag state
 var is_dragging: bool = false
@@ -90,11 +95,57 @@ func _build_isometric_grid():
 	for child in plots_root.get_children():
 		child.queue_free()
 	
+	if meadow_container != null and is_instance_valid(meadow_container):
+		meadow_container.queue_free()
+	
+	meadow_container = Node2D.new()
+	meadow_container.name = "MeadowGround"
+	world_container.add_child(meadow_container)
+	world_container.move_child(meadow_container, 0)
+	
 	var origin_x = 0.0
 	var origin_y = -60.0
 	var empty_style = StyleBoxEmpty.new()
-	var s = ISO_W / 256.0
+	var s = (ISO_W / 256.0) * 1.004 # 0.4% bleed prevents subpixel gap seams
 	
+	# 1. Build surrounding continuous meadow (16x16 field)
+	for my in range(-6, 10):
+		for mx in range(-6, 10):
+			if mx >= 0 and mx <= 3 and my >= 0 and my <= 3:
+				continue
+				
+			var m_iso_x = origin_x + (mx - my) * (ISO_W * 0.5)
+			var m_iso_y = origin_y + (mx + my) * (ISO_H * 0.5)
+			
+			var spr = Sprite2D.new()
+			spr.position = Vector2(m_iso_x, m_iso_y)
+			spr.scale = Vector2(s, s)
+			spr.z_index = -50
+			
+			# Weighted natural distribution across the 8 grass variants
+			var h = abs((mx * 73856093) ^ (my * 19349663) ^ (mx * my * 83492791)) % 100
+			var g_idx = 0
+			if h < 45:
+				g_idx = 0 # Plain olive lawn
+			elif h < 68:
+				g_idx = 1 # Grass blade tufts
+			elif h < 78:
+				g_idx = 2 # Golden buttercups
+			elif h < 86:
+				g_idx = 3 # Clover clusters
+			elif h < 92:
+				g_idx = 4 # White wild daisies
+			elif h < 95:
+				g_idx = 5 # Dandelion puffs
+			elif h < 98:
+				g_idx = 6 # Sunny morning highlights
+			else:
+				g_idx = 7 # Mossy pasture
+			
+			spr.texture = tex_grass[g_idx]
+			meadow_container.add_child(spr)
+	
+	# 2. Build the 16 interactive farm plots (4x4)
 	for i in range(16):
 		var gx = i % 4
 		var gy = i / 4
@@ -111,10 +162,25 @@ func _build_isometric_grid():
 		# Layer 0: Seamless 2:1 Grass Diamond (Base of every cell)
 		var grass_sprite = Sprite2D.new()
 		grass_sprite.name = "Grass"
-		var g_idx = (gx * 3 + gy * 7) % tex_grass.size()
+		var farm_h = abs((gx * 73856093) ^ (gy * 19349663) ^ (gx * gy * 83492791)) % 100
+		var g_idx = 0
+		if farm_h < 40:
+			g_idx = 0
+		elif farm_h < 65:
+			g_idx = 1
+		elif farm_h < 75:
+			g_idx = 2
+		elif farm_h < 85:
+			g_idx = 3
+		elif farm_h < 92:
+			g_idx = 4
+		elif farm_h < 96:
+			g_idx = 5
+		else:
+			g_idx = 6
 		grass_sprite.texture = tex_grass[g_idx]
 		grass_sprite.scale = Vector2(s, s)
-		grass_sprite.position = Vector2(0, 0)
+		grass_sprite.position = Vector2.ZERO
 		node.add_child(grass_sprite)
 		
 		# Layer 1: Flat Furrowed Soil Diamond (Plowed FarmVille rows)
@@ -122,7 +188,7 @@ func _build_isometric_grid():
 		soil_sprite.name = "Soil"
 		soil_sprite.texture = tex_soil
 		soil_sprite.scale = Vector2(s, s)
-		soil_sprite.position = Vector2(0, 0)
+		soil_sprite.position = Vector2.ZERO
 		soil_sprite.visible = false
 		node.add_child(soil_sprite)
 		
