@@ -41,6 +41,7 @@ jobs:
             rm -rf build/web/Web
           fi
           touch build/web/.nojekyll
+          sed -i 's/<head>/<head><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">/g' build/web/index.html
 
       # Option A: Deploy directly to gh-pages branch (classic GitHub Pages)
       - name: Deploy to gh-pages branch
