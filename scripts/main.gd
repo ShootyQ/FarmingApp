@@ -1,7 +1,7 @@
 extends Control
 
 # FarmingApp: Authentic 2:1 Isometric FarmVille Engine
-# Seamless flat furrowed diamond plots with uncut custom 2.5D sprites
+# Interlocking 2:1 Grass & Plowed Soil Diamonds in 1970s National Park Olive Palette
 
 const ISO_W = 160.0
 const ISO_H = 80.0
@@ -22,7 +22,14 @@ const ISO_H = 80.0
 @onready var map_modal = $HUD/MapModal
 @onready var map_grid = $HUD/MapModal/Panel/VBox/MapGrid
 
+var tex_grass = [
+	preload("res://assets/tiles/iso_grass_0.png"),
+	preload("res://assets/tiles/iso_grass_1.png"),
+	preload("res://assets/tiles/iso_grass_2.png"),
+	preload("res://assets/tiles/iso_grass_3.png")
+]
 var tex_soil = preload("res://assets/tiles/iso_soil_flat.png")
+
 var tex_sprout = preload("res://assets/objects/sprout.png")
 var tex_crop_mid = preload("res://assets/objects/crop_mid.png")
 var tex_wheat = preload("res://assets/objects/wheat_mature.png")
@@ -86,6 +93,7 @@ func _build_isometric_grid():
 	var origin_x = 0.0
 	var origin_y = -60.0
 	var empty_style = StyleBoxEmpty.new()
+	var s = ISO_W / 256.0
 	
 	for i in range(16):
 		var gx = i % 4
@@ -100,17 +108,25 @@ func _build_isometric_grid():
 		node.position = Vector2(iso_x, iso_y)
 		node.z_index = gx + gy # Natural isometric Y-sorting
 		
-		# Layer 0: Flat Furrowed Soil Diamond (Pure 2:1 ratio)
+		# Layer 0: Seamless 2:1 Grass Diamond (Base of every cell)
+		var grass_sprite = Sprite2D.new()
+		grass_sprite.name = "Grass"
+		var g_idx = (gx * 3 + gy * 7) % tex_grass.size()
+		grass_sprite.texture = tex_grass[g_idx]
+		grass_sprite.scale = Vector2(s, s)
+		grass_sprite.position = Vector2(0, 0)
+		node.add_child(grass_sprite)
+		
+		# Layer 1: Flat Furrowed Soil Diamond (Plowed FarmVille rows)
 		var soil_sprite = Sprite2D.new()
 		soil_sprite.name = "Soil"
 		soil_sprite.texture = tex_soil
-		var s = ISO_W / 256.0
 		soil_sprite.scale = Vector2(s, s)
 		soil_sprite.position = Vector2(0, 0)
 		soil_sprite.visible = false
 		node.add_child(soil_sprite)
 		
-		# Layer 1: Standing Object Sprite (Tree Stump, Boulder, Crop, Weed)
+		# Layer 2: Standing Object Sprite (Tree Stump, Boulder, Crop, Weed)
 		var obj_sprite = Sprite2D.new()
 		obj_sprite.name = "ObjectSprite"
 		obj_sprite.offset = Vector2(0, -32)
@@ -118,7 +134,7 @@ func _build_isometric_grid():
 		obj_sprite.visible = false
 		node.add_child(obj_sprite)
 		
-		# Layer 2: Clean floating status badge
+		# Layer 3: Clean floating status badge
 		var badge = Label.new()
 		badge.name = "Badge"
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -131,7 +147,7 @@ func _build_isometric_grid():
 		badge.add_theme_constant_override("shadow_offset_y", 1)
 		node.add_child(badge)
 		
-		# Layer 3: Invisible Touch Area
+		# Layer 4: Invisible Touch Area
 		var touch_btn = Button.new()
 		touch_btn.name = "TouchBtn"
 		touch_btn.custom_minimum_size = Vector2(ISO_W, ISO_H)
@@ -265,7 +281,7 @@ func _render_plot(idx: int):
 		"grass":
 			soil_sprite.visible = false
 			obj_sprite.visible = false
-			badge.text = "" # Clean lawn!
+			badge.text = "" # Clean 70s meadow tile
 		
 		"obstacle":
 			soil_sprite.visible = false
@@ -298,7 +314,7 @@ func _render_plot(idx: int):
 			
 			if state == "empty":
 				obj_sprite.visible = false
-				badge.text = "" # Clean plowed soil ready for planting!
+				badge.text = "" # Clean furrowed plot ready for seeds
 			
 			elif state == "growing":
 				obj_sprite.visible = true
