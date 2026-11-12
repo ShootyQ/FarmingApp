@@ -1,7 +1,7 @@
 extends Control
 
 # FarmingApp: Authentic 2:1 Isometric FarmVille Engine
-# Full visual sprites for Crops, Stumps, Boulders, Weeds & Furrowed Soil
+# Seamless flat furrowed diamond plots with uncut custom 2.5D sprites
 
 const ISO_W = 160.0
 const ISO_H = 80.0
@@ -22,7 +22,7 @@ const ISO_H = 80.0
 @onready var map_modal = $HUD/MapModal
 @onready var map_grid = $HUD/MapModal/Panel/VBox/MapGrid
 
-var tex_soil = preload("res://assets/tiles/iso_soil_clean.png")
+var tex_soil = preload("res://assets/tiles/iso_soil_flat.png")
 var tex_sprout = preload("res://assets/objects/sprout.png")
 var tex_crop_mid = preload("res://assets/objects/crop_mid.png")
 var tex_wheat = preload("res://assets/objects/wheat_mature.png")
@@ -100,32 +100,31 @@ func _build_isometric_grid():
 		node.position = Vector2(iso_x, iso_y)
 		node.z_index = gx + gy # Natural isometric Y-sorting
 		
-		# Layer 0: Furrowed Soil Diamond (Plowed FarmVille rows)
+		# Layer 0: Flat Furrowed Soil Diamond (Pure 2:1 ratio)
 		var soil_sprite = Sprite2D.new()
 		soil_sprite.name = "Soil"
 		soil_sprite.texture = tex_soil
-		# Centered on top diamond face
-		soil_sprite.offset = Vector2(0, 36)
-		var s = ISO_W / 475.0
+		var s = ISO_W / 256.0
 		soil_sprite.scale = Vector2(s, s)
+		soil_sprite.position = Vector2(0, 0)
 		soil_sprite.visible = false
 		node.add_child(soil_sprite)
 		
 		# Layer 1: Standing Object Sprite (Tree Stump, Boulder, Crop, Weed)
 		var obj_sprite = Sprite2D.new()
 		obj_sprite.name = "ObjectSprite"
-		obj_sprite.offset = Vector2(0, -60)
-		obj_sprite.scale = Vector2(0.35, 0.35)
+		obj_sprite.offset = Vector2(0, -32)
+		obj_sprite.scale = Vector2(0.60, 0.60)
 		obj_sprite.visible = false
 		node.add_child(obj_sprite)
 		
-		# Layer 2: Floating Info Badge
+		# Layer 2: Clean floating status badge
 		var badge = Label.new()
 		badge.name = "Badge"
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		badge.custom_minimum_size = Vector2(140, 28)
-		badge.position = Vector2(-70, -45)
+		badge.custom_minimum_size = Vector2(100, 24)
+		badge.position = Vector2(-50, -48)
 		badge.add_theme_font_size_override("font_size", 12)
 		badge.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
 		badge.add_theme_constant_override("shadow_offset_x", 1)
@@ -188,7 +187,7 @@ func _setup_map_buttons():
 func _select_crop(crop_id: String):
 	GameState.selected_crop = crop_id
 	var c = GameData.CROPS[crop_id]
-	_show_message("Selected seed: %s (Cost: %dc)" % [c["name"], c["cost"]], false)
+	_show_message("Selected: %s (Cost: %dc)" % [c["name"], c["cost"]], false)
 
 func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
@@ -266,8 +265,7 @@ func _render_plot(idx: int):
 		"grass":
 			soil_sprite.visible = false
 			obj_sprite.visible = false
-			badge.text = "[Till: 5c]"
-			badge.modulate = Color(0.7, 0.9, 0.6, 0.5)
+			badge.text = "" # Clean lawn!
 		
 		"obstacle":
 			soil_sprite.visible = false
@@ -277,21 +275,16 @@ func _render_plot(idx: int):
 			match tile["obstacle_id"]:
 				"hardwood_stump":
 					obj_sprite.texture = tex_stump
-					obj_sprite.scale = Vector2(0.35, 0.35)
 				"granite_boulder":
 					obj_sprite.texture = tex_boulder
-					obj_sprite.scale = Vector2(0.35, 0.35)
 				"small_rock":
 					obj_sprite.texture = tex_boulder
-					obj_sprite.scale = Vector2(0.22, 0.22)
 				"small_wood":
 					obj_sprite.texture = tex_stump
-					obj_sprite.scale = Vector2(0.22, 0.22)
 				_:
 					obj_sprite.texture = tex_weed
-					obj_sprite.scale = Vector2(0.30, 0.30)
 			
-			badge.text = "%d taps" % tile["taps_left"]
+			badge.text = "%d" % tile["taps_left"]
 			if obs["required_tool_tier"] > GameState.tool_tier:
 				badge.modulate = Color(1.0, 0.45, 0.45, 1.0)
 				obj_sprite.modulate = Color(1.0, 0.6, 0.6)
@@ -305,8 +298,7 @@ func _render_plot(idx: int):
 			
 			if state == "empty":
 				obj_sprite.visible = false
-				badge.text = "[Plant %s]" % GameState.selected_crop.capitalize()
-				badge.modulate = Color(1.0, 0.95, 0.85, 0.9)
+				badge.text = "" # Clean plowed soil ready for planting!
 			
 			elif state == "growing":
 				obj_sprite.visible = true
@@ -314,18 +306,15 @@ func _render_plot(idx: int):
 				var elapsed = now - tile.get("plant_time", now)
 				var pct = elapsed / max(1.0, tile.get("grow_duration", 1.0))
 				
-				# Sprout -> Half-grown
 				if pct < 0.5:
 					obj_sprite.texture = tex_sprout
-					obj_sprite.scale = Vector2(0.25, 0.25)
 				else:
 					obj_sprite.texture = tex_crop_mid
-					obj_sprite.scale = Vector2(0.32, 0.32)
 				obj_sprite.modulate = Color.WHITE
 				
 				var remain = max(0.0, tile.get("grow_duration", 0.0) - elapsed)
 				badge.text = "%ds" % ceil(remain)
-				badge.modulate = Color(0.8, 1.0, 0.8, 1.0)
+				badge.modulate = Color(0.9, 1.0, 0.7, 1.0)
 			
 			elif state == "ready":
 				obj_sprite.visible = true
@@ -333,21 +322,17 @@ func _render_plot(idx: int):
 				match crop_id:
 					"wheat":
 						obj_sprite.texture = tex_wheat
-						obj_sprite.scale = Vector2(0.38, 0.38)
 					"carrot":
 						obj_sprite.texture = tex_carrot
-						obj_sprite.scale = Vector2(0.38, 0.38)
 					"strawberry":
 						obj_sprite.texture = tex_berry
-						obj_sprite.scale = Vector2(0.38, 0.38)
 					_:
 						obj_sprite.texture = tex_wheat
-						obj_sprite.scale = Vector2(0.42, 0.42)
 				
 				var is_mut = tile.get("is_mutated", false)
 				if is_mut:
-					obj_sprite.modulate = Color(1.2, 1.1, 0.4) # Glowing golden shimmer
-					badge.text = "GOLDEN! HARVEST (+%dc)" % GameData.CROPS[crop_id]["mutated_reward"]
+					obj_sprite.modulate = Color(1.3, 1.15, 0.3)
+					badge.text = "GOLDEN! (+%dc)" % GameData.CROPS[crop_id]["mutated_reward"]
 					badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
 				else:
 					obj_sprite.modulate = Color.WHITE
