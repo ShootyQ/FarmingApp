@@ -118,8 +118,8 @@ horizontal_alignment = 1
 [node name="GridContainer" type="GridContainer" parent="Margin/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 8
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
 columns = 4
 
 [node name="BottomControls" type="HBoxContainer" parent="Margin/VBox"]
