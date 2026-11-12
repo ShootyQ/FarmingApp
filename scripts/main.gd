@@ -1,6 +1,7 @@
 extends Control
 
 # FarmingApp: Authentic 2:1 Isometric FarmVille Engine
+# Seamless transparent diamond plots over vibrant pasture green
 
 const ISO_W = 160.0
 const ISO_H = 80.0
@@ -21,8 +22,7 @@ const ISO_H = 80.0
 @onready var map_modal = $HUD/MapModal
 @onready var map_grid = $HUD/MapModal/Panel/VBox/MapGrid
 
-var iso_grass_tex = preload("res://assets/tiles/iso_grass.png")
-var iso_soil_tex = preload("res://assets/tiles/iso_soil.png")
+var iso_soil_tex = preload("res://assets/tiles/iso_soil_clean.png")
 
 var plot_nodes: Array[Node2D] = []
 
@@ -52,7 +52,6 @@ func _process(_delta: float):
 	_update_active_crop_labels()
 
 func _unhandled_input(event: InputEvent):
-	# Pan with mouse drag or touch
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
@@ -78,7 +77,8 @@ func _build_isometric_grid():
 	
 	# 4x4 isometric diamond grid
 	var origin_x = 0.0
-	var origin_y = -120.0
+	var origin_y = -60.0
+	var empty_style = StyleBoxEmpty.new()
 	
 	for i in range(16):
 		var gx = i % 4
@@ -91,32 +91,41 @@ func _build_isometric_grid():
 		var node = Node2D.new()
 		node.name = "Plot_%d" % i
 		node.position = Vector2(iso_x, iso_y)
-		node.z_index = gx + gy # Y-sort depth
+		node.z_index = gx + gy # Natural isometric Y-sorting
 		
-		# Layer 0: Grass Diamond
-		var grass_sprite = Sprite2D.new()
-		grass_sprite.name = "Grass"
-		grass_sprite.texture = iso_grass_tex
-		grass_sprite.scale = Vector2(ISO_W / 512.0, ISO_H / 256.0)
-		node.add_child(grass_sprite)
-		
-		# Layer 1: Furrowed Soil Diamond (FarmVille plowed rows)
+		# Layer 0: Furrowed Soil Diamond (100% transparent background)
 		var soil_sprite = Sprite2D.new()
 		soil_sprite.name = "Soil"
 		soil_sprite.texture = iso_soil_tex
-		soil_sprite.scale = Vector2(ISO_W / 512.0, ISO_H / 256.0)
+		# Scale to match ISO_W exactly
+		var s = ISO_W / 475.0
+		soil_sprite.scale = Vector2(s, s)
+		soil_sprite.position = Vector2(0, 0)
 		soil_sprite.visible = false
 		node.add_child(soil_sprite)
 		
-		# Layer 2: Interactive Touch Area & Badge
+		# Layer 1: Floating Label Badge
+		var badge = Label.new()
+		badge.name = "Badge"
+		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		badge.custom_minimum_size = Vector2(140, 40)
+		badge.position = Vector2(-70, -20)
+		badge.add_theme_font_size_override("font_size", 12)
+		badge.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+		badge.add_theme_constant_override("shadow_offset_x", 1)
+		badge.add_theme_constant_override("shadow_offset_y", 1)
+		node.add_child(badge)
+		
+		# Layer 2: Invisible Touch/Click Area
 		var touch_btn = Button.new()
 		touch_btn.name = "TouchBtn"
-		touch_btn.flat = true
 		touch_btn.custom_minimum_size = Vector2(ISO_W, ISO_H)
 		touch_btn.position = Vector2(-ISO_W * 0.5, -ISO_H * 0.5)
-		touch_btn.clip_text = false
-		touch_btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		touch_btn.add_theme_font_size_override("font_size", 13)
+		touch_btn.add_theme_stylebox_override("normal", empty_style)
+		touch_btn.add_theme_stylebox_override("hover", empty_style)
+		touch_btn.add_theme_stylebox_override("pressed", empty_style)
+		touch_btn.add_theme_stylebox_override("focus", empty_style)
 		
 		var idx = i
 		touch_btn.pressed.connect(func(): _on_plot_clicked(idx))
@@ -225,12 +234,12 @@ func _render_plot(idx: int):
 		return
 	var node = plot_nodes[idx]
 	var soil_sprite = node.get_node("Soil") as Sprite2D
-	var btn = node.get_node("TouchBtn") as Button
+	var badge = node.get_node("Badge") as Label
 	
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
 	if idx >= tiles.size():
 		soil_sprite.visible = false
-		btn.text = ""
+		badge.text = ""
 		return
 	
 	var tile = tiles[idx]
@@ -238,38 +247,39 @@ func _render_plot(idx: int):
 	
 	match type:
 		"grass":
+			# Clean green pasture!
 			soil_sprite.visible = false
-			btn.text = ""
-			btn.modulate = Color.WHITE
+			badge.text = "[Till Soil (5c)]"
+			badge.modulate = Color(0.7, 0.9, 0.6, 0.65)
 		
 		"obstacle":
 			soil_sprite.visible = false
 			var obs = GameData.OBSTACLES[tile["obstacle_id"]]
-			btn.text = "[%s]\n%d taps" % [obs["name"], tile["taps_left"]]
+			badge.text = "[%s]\n%d taps" % [obs["name"], tile["taps_left"]]
 			if obs["required_tool_tier"] > GameState.tool_tier:
-				btn.modulate = Color(1.0, 0.45, 0.45)
+				badge.modulate = Color(1.0, 0.45, 0.45, 1.0)
 			else:
-				btn.modulate = Color(1.0, 0.95, 0.75)
+				badge.modulate = Color(1.0, 0.95, 0.75, 1.0)
 		
 		"soil":
 			soil_sprite.visible = true
 			var state = tile.get("state", "empty")
 			if state == "empty":
-				btn.text = "[Plant %s]" % GameState.selected_crop.capitalize()
-				btn.modulate = Color(1.0, 0.95, 0.8)
+				badge.text = "[Plant %s]" % GameState.selected_crop.capitalize()
+				badge.modulate = Color(1.0, 0.95, 0.85, 1.0)
 			elif state == "ready":
 				var crop = GameData.CROPS[tile["crop"]]
 				var is_mut = tile.get("is_mutated", false)
 				if is_mut:
-					btn.text = "**%s**\nHARVEST! (+%dc)" % [crop["mutated_name"].to_upper(), crop["mutated_reward"]]
-					btn.modulate = Color(1.0, 0.88, 0.2)
+					badge.text = "**%s**\nHARVEST! (+%dc)" % [crop["mutated_name"].to_upper(), crop["mutated_reward"]]
+					badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
 				else:
-					btn.text = "%s\nHARVEST! (+%dc)" % [crop["name"].to_upper(), crop["reward"]]
-					btn.modulate = Color(1.0, 1.0, 0.4)
+					badge.text = "%s\nHARVEST! (+%dc)" % [crop["name"].to_upper(), crop["reward"]]
+					badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 			elif state == "growing":
 				var crop = GameData.CROPS[tile["crop"]]
-				btn.text = "%s (Growing)" % crop["name"]
-				btn.modulate = Color(0.8, 1.0, 0.8)
+				badge.text = "%s (Growing)" % crop["name"]
+				badge.modulate = Color(0.8, 1.0, 0.8, 1.0)
 
 func _update_active_crop_labels():
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
@@ -280,9 +290,9 @@ func _update_active_crop_labels():
 			var crop = GameData.CROPS[tile["crop"]]
 			var elapsed = now - tile.get("plant_time", now)
 			var remain = max(0.0, tile.get("grow_duration", 0.0) - elapsed)
-			var btn = plot_nodes[i].get_node("TouchBtn") as Button
+			var badge = plot_nodes[i].get_node("Badge") as Label
 			if remain > 0:
-				btn.text = "%s\n%ds left" % [crop["name"], ceil(remain)]
+				badge.text = "%s\n%ds left" % [crop["name"], ceil(remain)]
 			else:
 				tile["state"] = "ready"
 				_render_plot(i)
