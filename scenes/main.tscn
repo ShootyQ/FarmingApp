@@ -18,7 +18,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.243137, 0.490196, 0.270588, 1)
+color = Color(0.18, 0.38, 0.22, 1)
 
 [node name="Margin" type="MarginContainer" parent="."]
 layout_mode = 1
@@ -27,101 +27,138 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_top = 24
-theme_override_constants/margin_right = 24
-theme_override_constants/margin_bottom = 24
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
 [node name="VBox" type="VBoxContainer" parent="Margin"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 10
 
 [node name="TopBar" type="HBoxContainer" parent="Margin/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 24
+theme_override_constants/separation = 16
 
-[node name="Title" type="Label" parent="Margin/VBox/TopBar"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 28
-text = "🌾 FarmingApp"
-
-[node name="CoinsLabel" type="Label" parent="Margin/VBox/TopBar"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 24
-text = "🪙 Coins: 50"
-
-[node name="StatusLabel" type="Label" parent="Margin/VBox/TopBar"]
+[node name="SectorInfo" type="HBoxContainer" parent="Margin/VBox/TopBar"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="SectorTitle" type="Label" parent="Margin/VBox/TopBar/SectorInfo"]
+layout_mode = 2
 theme_override_font_sizes/font_size = 20
-text = "Tap a plot to plant seeds!"
-horizontal_alignment = 2
+text = "📍 The Homestead (1,1)"
 
-[node name="PlotGrid" type="GridContainer" parent="Margin/VBox"]
+[node name="MapBtn" type="Button" parent="Margin/VBox/TopBar/SectorInfo"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "🗺️ Map"
+
+[node name="Resources" type="HBoxContainer" parent="Margin/VBox/TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Coins" type="Label" parent="Margin/VBox/TopBar/Resources"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "🪙 150"
+
+[node name="Wood" type="Label" parent="Margin/VBox/TopBar/Resources"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "🪵 10"
+
+[node name="Stone" type="Label" parent="Margin/VBox/TopBar/Resources"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "🪨 5"
+
+[node name="Relics" type="Label" parent="Margin/VBox/TopBar/Resources"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "🏺 0"
+
+[node name="StatusBanner" type="Label" parent="Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Tap weeds, logs, or rocks to clear your farm! Tap soil to plant."
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="Margin/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/h_separation = 16
-theme_override_constants/v_separation = 16
-columns = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+columns = 4
 
-[node name="Plot1" type="Button" parent="Margin/VBox/PlotGrid"]
+[node name="BottomControls" type="HBoxContainer" parent="Margin/VBox"]
+custom_minimum_size = Vector2(0, 72)
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SeedBar" type="HBoxContainer" parent="Margin/VBox/BottomControls"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 18
+theme_override_constants/separation = 8
 
-[node name="Plot2" type="Button" parent="Margin/VBox/PlotGrid"]
+[node name="ToolUpgradeBtn" type="Button" parent="Margin/VBox/BottomControls"]
+custom_minimum_size = Vector2(260, 0)
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 14
+text = "🛠️ Tools Upgrade"
 
-[node name="Plot3" type="Button" parent="Margin/VBox/PlotGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 18
+[node name="MapModal" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Plot4" type="Button" parent="Margin/VBox/PlotGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 18
+[node name="Overlay" type="ColorRect" parent="MapModal"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.75)
 
-[node name="Plot5" type="Button" parent="Margin/VBox/PlotGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 18
+[node name="Panel" type="PanelContainer" parent="MapModal"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -220.0
+offset_right = 300.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Plot6" type="Button" parent="Margin/VBox/PlotGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 18
-
-[node name="BottomBar" type="HBoxContainer" parent="Margin/VBox"]
-custom_minimum_size = Vector2(0, 70)
+[node name="VBox" type="VBoxContainer" parent="MapModal/Panel"]
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="SeedWheat" type="Button" parent="Margin/VBox/BottomBar"]
+[node name="Title" type="Label" parent="MapModal/Panel/VBox"]
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 20
-toggle_mode = true
-text = "🌾 Wheat ($10)"
+theme_override_font_sizes/font_size = 22
+text = "🗺️ World Map - Farm Sectors"
+horizontal_alignment = 1
 
-[node name="SeedCarrot" type="Button" parent="Margin/VBox/BottomBar"]
+[node name="MapGrid" type="GridContainer" parent="MapModal/Panel/VBox"]
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 20
-toggle_mode = true
-text = "🥕 Carrot ($25)"
+size_flags_vertical = 3
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 3
 
-[node name="SeedBerry" type="Button" parent="Margin/VBox/BottomBar"]
+[node name="CloseMapBtn" type="Button" parent="MapModal/Panel/VBox"]
+custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 20
-toggle_mode = true
-text = "🍓 Berry ($50)"
+theme_override_font_sizes/font_size = 16
+text = "Back to Farm"
