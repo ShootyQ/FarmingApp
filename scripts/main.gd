@@ -34,9 +34,13 @@ var tex_grass = [
 ]
 var tex_soil = preload("res://assets/tiles/iso_soil_flat.png")
 
-var tex_sprout = preload("res://assets/objects/sprout.png")
-var tex_crop_mid = preload("res://assets/objects/crop_mid.png")
-var tex_wheat = preload("res://assets/objects/wheat_mature.png")
+# Wheat growth stages
+var tex_wheat_sprout = preload("res://assets/objects/wheat_sprout.png")
+var tex_wheat_growing = preload("res://assets/objects/wheat_growing.png")
+var tex_wheat_heading = preload("res://assets/objects/wheat_heading.png")
+var tex_wheat_mature = preload("res://assets/objects/wheat_mature.png")
+var tex_wheat_legendary = preload("res://assets/objects/wheat_legendary.png")
+
 var tex_carrot = preload("res://assets/objects/carrot_mature.png")
 var tex_berry = preload("res://assets/objects/berry_mature.png")
 var tex_stump = preload("res://assets/objects/stump.png")
@@ -365,40 +369,71 @@ func _render_plot(idx: int):
 				obj_sprite.visible = true
 				var now = Time.get_unix_time_from_system()
 				var elapsed = now - tile.get("plant_time", now)
-				var pct = elapsed / max(1.0, tile.get("grow_duration", 1.0))
+				var total = max(1.0, tile.get("grow_duration", 1.0))
+				var pct = elapsed / total
+				var crop_id = tile.get("crop", "wheat")
 				
-				if pct < 0.5:
-					obj_sprite.texture = tex_sprout
+				if crop_id == "wheat":
+					obj_sprite.offset = Vector2(0, -96)
+					badge.position = Vector2(-50, -90)
+					if pct < 0.33:
+						obj_sprite.texture = tex_wheat_sprout
+					elif pct < 0.66:
+						obj_sprite.texture = tex_wheat_growing
+					else:
+						obj_sprite.texture = tex_wheat_heading
 				else:
-					obj_sprite.texture = tex_crop_mid
-				obj_sprite.modulate = Color.WHITE
+					obj_sprite.offset = Vector2(0, -32)
+					badge.position = Vector2(-50, -48)
+					if pct < 0.5:
+						obj_sprite.texture = tex_wheat_sprout
+					else:
+						obj_sprite.texture = tex_wheat_growing
 				
-				var remain = max(0.0, tile.get("grow_duration", 0.0) - elapsed)
+				obj_sprite.modulate = Color.WHITE
+				var remain = max(0.0, total - elapsed)
 				badge.text = "%ds" % ceil(remain)
 				badge.modulate = Color(0.9, 1.0, 0.7, 1.0)
 			
 			elif state == "ready":
 				obj_sprite.visible = true
-				var crop_id = tile["crop"]
+				var crop_id = tile.get("crop", "wheat")
+				var is_mut = tile.get("is_mutated", false)
+				
 				match crop_id:
 					"wheat":
-						obj_sprite.texture = tex_wheat
+						obj_sprite.offset = Vector2(0, -96)
+						badge.position = Vector2(-50, -112)
+						if is_mut:
+							obj_sprite.texture = tex_wheat_legendary
+							obj_sprite.modulate = Color.WHITE
+							badge.text = "★GOLDEN!★ (+%dc)" % GameData.CROPS[crop_id]["mutated_reward"]
+							badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
+						else:
+							obj_sprite.texture = tex_wheat_mature
+							obj_sprite.modulate = Color.WHITE
+							badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
+							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					"carrot":
+						obj_sprite.offset = Vector2(0, -32)
+						badge.position = Vector2(-50, -48)
 						obj_sprite.texture = tex_carrot
+						obj_sprite.modulate = Color.WHITE
+						badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
+						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					"strawberry":
+						obj_sprite.offset = Vector2(0, -32)
+						badge.position = Vector2(-50, -48)
 						obj_sprite.texture = tex_berry
+						obj_sprite.modulate = Color.WHITE
+						badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
+						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					_:
-						obj_sprite.texture = tex_wheat
-				
-				var is_mut = tile.get("is_mutated", false)
-				if is_mut:
-					obj_sprite.modulate = Color(1.3, 1.15, 0.3)
-					badge.text = "GOLDEN! (+%dc)" % GameData.CROPS[crop_id]["mutated_reward"]
-					badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
-				else:
-					obj_sprite.modulate = Color.WHITE
-					badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
-					badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+						obj_sprite.offset = Vector2(0, -96)
+						obj_sprite.texture = tex_wheat_mature
+						obj_sprite.modulate = Color.WHITE
+						badge.text = "HARVEST!"
+						badge.modulate = Color.WHITE
 
 func _update_active_crop_labels():
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
@@ -407,13 +442,30 @@ func _update_active_crop_labels():
 		var tile = tiles[i]
 		if tile.get("type") == "soil" and tile.get("state") == "growing":
 			var elapsed = now - tile.get("plant_time", now)
-			var remain = max(0.0, tile.get("grow_duration", 0.0) - elapsed)
+			var total = max(1.0, tile.get("grow_duration", 1.0))
+			var remain = max(0.0, total - elapsed)
 			if remain <= 0.0:
 				tile["state"] = "ready"
 				_render_plot(i)
 			else:
-				var badge = plot_nodes[i].get_node("Badge") as Label
+				var node = plot_nodes[i]
+				var badge = node.get_node("Badge") as Label
 				badge.text = "%ds" % ceil(remain)
+				
+				# Update visual growth phase in real time
+				var crop_id = tile.get("crop", "wheat")
+				var pct = elapsed / total
+				var obj_sprite = node.get_node("ObjectSprite") as Sprite2D
+				if crop_id == "wheat":
+					if pct < 0.33:
+						if obj_sprite.texture != tex_wheat_sprout:
+							obj_sprite.texture = tex_wheat_sprout
+					elif pct < 0.66:
+						if obj_sprite.texture != tex_wheat_growing:
+							obj_sprite.texture = tex_wheat_growing
+					else:
+						if obj_sprite.texture != tex_wheat_heading:
+							obj_sprite.texture = tex_wheat_heading
 
 func _refresh_map_grid():
 	var idx = 0
