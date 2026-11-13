@@ -112,49 +112,49 @@ const ITEMS = {
 	"wheat": {
 		"name": "Wheat",
 		"sell_value": 25,
-		"icon": "res://assets/objects/wheat_mature.png",
+		"icon": "res://assets/icons/icon_wheat.png",
 		"desc": "Crisp golden stalks of farm-fresh wheat."
 	},
 	"golden_wheat": {
 		"name": "Golden Wheat ★",
 		"sell_value": 100,
-		"icon": "res://assets/objects/wheat_legendary.png",
+		"icon": "res://assets/icons/icon_golden_wheat.png",
 		"desc": "Rare golden-sheaf wheat glowing with sun energy."
 	},
 	"carrot": {
 		"name": "Carrot",
 		"sell_value": 65,
-		"icon": "res://assets/objects/carrot_mature.png",
+		"icon": "res://assets/icons/icon_carrot.png",
 		"desc": "Sweet, crunchy heirloom orange carrot."
 	},
 	"crystal_carrot": {
 		"name": "Crystal Carrot ★",
 		"sell_value": 250,
-		"icon": "res://assets/objects/carrot_crystal.png",
+		"icon": "res://assets/icons/icon_crystal_carrot.png",
 		"desc": "A legendary prismatic crystalline root."
 	},
 	"strawberry": {
 		"name": "Strawberry",
 		"sell_value": 160,
-		"icon": "res://assets/objects/strawberry_mature.png",
+		"icon": "res://assets/icons/icon_strawberry.png",
 		"desc": "Plump, sun-ripened red garden strawberry."
 	},
 	"jeweled_berry": {
 		"name": "Jeweled Berry ★",
 		"sell_value": 600,
-		"icon": "res://assets/objects/strawberry_jeweled.png",
+		"icon": "res://assets/icons/icon_jeweled_berry.png",
 		"desc": "Glittering ruby gemstone strawberry fit for royalty."
 	},
 	"pumpkin": {
 		"name": "Pumpkin",
 		"sell_value": 450,
-		"icon": "res://assets/objects/pumpkin_mature.png",
+		"icon": "res://assets/icons/icon_pumpkin.png",
 		"desc": "A hearty, heavy autumn prize pumpkin."
 	},
 	"haunted_pumpkin": {
 		"name": "Haunted Pumpkin ★",
 		"sell_value": 1800,
-		"icon": "res://assets/objects/pumpkin_haunted.png",
+		"icon": "res://assets/icons/icon_haunted_pumpkin.png",
 		"desc": "Spooky glowing purple pumpkin with mysterious essence."
 	}
 }

@@ -720,13 +720,13 @@ func _build_barn_modal():
 		slot_btn.add_theme_stylebox_override("hover", sb_h)
 		slot_btn.add_theme_stylebox_override("pressed", sb_h)
 		
-		# Icon
+		# Icon (Crisp, large, centered)
 		var icon = TextureRect.new()
 		icon.name = "Icon"
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.size = Vector2(56, 56)
-		icon.position = Vector2(20, 14)
+		icon.size = Vector2(68, 68)
+		icon.position = Vector2(14, 14)
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		slot_btn.add_child(icon)
 		
