@@ -68,6 +68,7 @@ var meadow_container: Node2D = null
 var is_dragging: bool = false
 var drag_start_mouse: Vector2 = Vector2.ZERO
 var drag_start_cam: Vector2 = Vector2.ZERO
+var total_drag_dist: float = 0.0
 
 func _ready():
 	_build_isometric_grid()
@@ -94,9 +95,12 @@ func _unhandled_input(event: InputEvent):
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				is_dragging = true
+				total_drag_dist = 0.0
 				drag_start_mouse = get_viewport().get_mouse_position()
 				drag_start_cam = camera.position
 			else:
+				if is_dragging and total_drag_dist < 10.0:
+					_handle_isometric_click()
 				is_dragging = false
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			camera.zoom = clamp(camera.zoom * 1.1, Vector2(0.6, 0.6), Vector2(2.0, 2.0))
@@ -105,8 +109,25 @@ func _unhandled_input(event: InputEvent):
 			
 	elif event is InputEventMouseMotion and is_dragging:
 		var current_mouse = get_viewport().get_mouse_position()
+		total_drag_dist += (current_mouse - drag_start_mouse).length()
 		var diff = (drag_start_mouse - current_mouse) / camera.zoom
 		camera.position = drag_start_cam + diff
+
+func _handle_isometric_click():
+	var local_pos = plots_root.get_local_mouse_position()
+	var origin_x = 0.0
+	var origin_y = -60.0
+	
+	var dx = local_pos.x - origin_x
+	var dy = local_pos.y - origin_y
+	
+	# Pure 2:1 isometric diamond inversion formula (exact diamond hit-test, zero neighbor overlap)
+	var gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
+	var gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
+	
+	if gx >= 0 and gx < 4 and gy >= 0 and gy < 4:
+		var idx = gy * 4 + gx
+		_on_plot_clicked(idx)
 
 func _build_isometric_grid():
 	plot_nodes.clear()
@@ -126,7 +147,6 @@ func _build_isometric_grid():
 	
 	var origin_x = 0.0
 	var origin_y = -60.0
-	var empty_style = StyleBoxEmpty.new()
 	var s = (ISO_W / 256.0) * 1.002 # Tight seamless 2:1 fit
 	
 	# 1. Build continuous 20x20 meadow landscape
@@ -200,6 +220,7 @@ func _build_isometric_grid():
 		# Layer 3: Clean floating status badge
 		var badge = Label.new()
 		badge.name = "Badge"
+		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		badge.custom_minimum_size = Vector2(100, 24)
@@ -209,20 +230,6 @@ func _build_isometric_grid():
 		badge.add_theme_constant_override("shadow_offset_x", 1)
 		badge.add_theme_constant_override("shadow_offset_y", 1)
 		node.add_child(badge)
-		
-		# Layer 4: Invisible Touch Area
-		var touch_btn = Button.new()
-		touch_btn.name = "TouchBtn"
-		touch_btn.custom_minimum_size = Vector2(ISO_W, ISO_H)
-		touch_btn.position = Vector2(-ISO_W * 0.5, -ISO_H * 0.5)
-		touch_btn.add_theme_stylebox_override("normal", empty_style)
-		touch_btn.add_theme_stylebox_override("hover", empty_style)
-		touch_btn.add_theme_stylebox_override("pressed", empty_style)
-		touch_btn.add_theme_stylebox_override("focus", empty_style)
-		
-		var idx = i
-		touch_btn.pressed.connect(func(): _on_plot_clicked(idx))
-		node.add_child(touch_btn)
 		
 		plots_root.add_child(node)
 		plot_nodes.append(node)
