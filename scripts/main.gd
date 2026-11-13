@@ -17,10 +17,24 @@ const ISO_H = 80.0
 @onready var sector_title = $HUD/Margin/VBox/TopBar/SectorInfo/SectorTitle
 @onready var status_banner = $HUD/Margin/VBox/StatusBanner
 
-@onready var seed_bar = $HUD/Margin/VBox/BottomControls/SeedBar
-@onready var tool_btn = $HUD/Margin/VBox/BottomControls/ToolUpgradeBtn
+@onready var bottom_controls = $HUD/Margin/VBox/BottomControls
 @onready var map_modal = $HUD/MapModal
 @onready var map_grid = $HUD/MapModal/Panel/VBox/MapGrid
+
+# Gardener's Dock Controls
+var dock_barn_btn: Button
+var dock_active_seed_btn: Button
+var dock_tool_btn: Button
+var dock_market_btn: Button
+
+# Seed Drawer & Market Modal
+var seed_drawer: PanelContainer
+var seed_drawer_grid: GridContainer
+
+var market_modal: Control
+var market_items_vbox: VBoxContainer
+var market_balance_label: Label
+var market_empty_label: Label
 
 var tex_grass = [
 	preload("res://assets/tiles/iso_grass_0.png"),
@@ -97,17 +111,19 @@ var total_drag_dist: float = 0.0
 
 func _ready():
 	_build_isometric_grid()
-	_setup_seed_buttons()
-	_setup_map_buttons()
+	_setup_gardener_dock()
+	_build_seed_drawer()
+	_build_market_modal()
 	_build_barn_modal()
+	_setup_map_buttons()
 	
 	GameState.state_updated.connect(_refresh_ui)
 	GameState.tile_updated.connect(_on_tile_updated)
 	GameState.message_broadcast.connect(_show_message)
 	GameState.barn_opened.connect(_open_barn_modal)
 	GameState.barn_updated.connect(_refresh_barn_modal)
+	GameState.barn_updated.connect(_refresh_market_modal)
 	
-	tool_btn.pressed.connect(_on_tool_upgrade_pressed)
 	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.pressed.connect(func(): map_modal.visible = true)
 	$HUD/MapModal/Panel/VBox/CloseMapBtn.pressed.connect(func(): map_modal.visible = false)
 	
@@ -267,26 +283,83 @@ func _build_isometric_grid():
 		plots_root.add_child(node)
 		plot_nodes.append(node)
 
-func _setup_seed_buttons():
-	for child in seed_bar.get_children():
+func _setup_gardener_dock():
+	for child in bottom_controls.get_children():
 		child.queue_free()
 	
-	var group = ButtonGroup.new()
-	for crop_id in GameData.CROPS:
-		var c = GameData.CROPS[crop_id]
-		var btn = Button.new()
-		btn.toggle_mode = true
-		btn.button_group = group
-		btn.text = "%s\n%dc" % [c["name"], c["cost"]]
-		btn.add_theme_font_size_override("font_size", 14)
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_controls.alignment = BoxContainer.ALIGNMENT_CENTER
+	bottom_controls.add_theme_constant_override("separation", 14)
+	
+	var make_wood_sb = func(bg: Color, border: Color) -> StyleBoxFlat:
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = bg
+		sb.set_border_width_all(2)
+		sb.border_color = border
+		sb.set_corner_radius_all(10)
+		sb.content_margin_left = 16
+		sb.content_margin_right = 16
+		sb.content_margin_top = 8
+		sb.content_margin_bottom = 8
+		return sb
 		
-		var id = crop_id
-		btn.pressed.connect(func(): _select_crop(id))
-		seed_bar.add_child(btn)
-		
-		if crop_id == GameState.selected_crop:
-			btn.button_pressed = true
+	var normal_wood = make_wood_sb.call(Color(0.20, 0.13, 0.08, 0.94), Color(0.60, 0.45, 0.25, 0.85))
+	var hover_wood = make_wood_sb.call(Color(0.28, 0.18, 0.11, 0.98), Color(0.95, 0.80, 0.35, 1.0))
+	var active_gold = make_wood_sb.call(Color(0.24, 0.15, 0.08, 0.96), Color(1.0, 0.82, 0.25, 1.0))
+	
+	# 1. Barn Storage Shortcut Button
+	dock_barn_btn = Button.new()
+	dock_barn_btn.custom_minimum_size = Vector2(150, 56)
+	dock_barn_btn.text = "🎒 Barn (0/10)"
+	dock_barn_btn.add_theme_font_size_override("font_size", 14)
+	dock_barn_btn.add_theme_stylebox_override("normal", normal_wood)
+	dock_barn_btn.add_theme_stylebox_override("hover", hover_wood)
+	dock_barn_btn.add_theme_stylebox_override("pressed", hover_wood)
+	dock_barn_btn.pressed.connect(_open_barn_modal)
+	bottom_controls.add_child(dock_barn_btn)
+	
+	# 2. Active Seed Pill (Click to open Seed Pouch Drawer)
+	dock_active_seed_btn = Button.new()
+	dock_active_seed_btn.custom_minimum_size = Vector2(240, 56)
+	dock_active_seed_btn.text = "🌱 Seed: Wheat (10c) ▼"
+	dock_active_seed_btn.add_theme_font_size_override("font_size", 14)
+	dock_active_seed_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+	dock_active_seed_btn.add_theme_stylebox_override("normal", active_gold)
+	dock_active_seed_btn.add_theme_stylebox_override("hover", hover_wood)
+	dock_active_seed_btn.add_theme_stylebox_override("pressed", hover_wood)
+	dock_active_seed_btn.pressed.connect(_toggle_seed_drawer)
+	bottom_controls.add_child(dock_active_seed_btn)
+	
+	# 3. Tool Bench Button
+	dock_tool_btn = Button.new()
+	dock_tool_btn.custom_minimum_size = Vector2(190, 56)
+	dock_tool_btn.text = "🪓 Wooden Tools"
+	dock_tool_btn.add_theme_font_size_override("font_size", 13)
+	dock_tool_btn.add_theme_stylebox_override("normal", normal_wood)
+	dock_tool_btn.add_theme_stylebox_override("hover", hover_wood)
+	dock_tool_btn.add_theme_stylebox_override("pressed", hover_wood)
+	dock_tool_btn.pressed.connect(_on_tool_upgrade_pressed)
+	bottom_controls.add_child(dock_tool_btn)
+	
+	# 4. Market / Farm Stand Button
+	dock_market_btn = Button.new()
+	dock_market_btn.custom_minimum_size = Vector2(160, 56)
+	dock_market_btn.text = "🏪 Town Market"
+	dock_market_btn.add_theme_font_size_override("font_size", 14)
+	var market_sb = make_wood_sb.call(Color(0.14, 0.22, 0.12, 0.94), Color(0.45, 0.75, 0.35, 0.85))
+	var market_hover = make_wood_sb.call(Color(0.18, 0.28, 0.15, 0.98), Color(0.70, 1.0, 0.50, 1.0))
+	dock_market_btn.add_theme_stylebox_override("normal", market_sb)
+	dock_market_btn.add_theme_stylebox_override("hover", market_hover)
+	dock_market_btn.add_theme_stylebox_override("pressed", market_hover)
+	dock_market_btn.pressed.connect(_open_market_modal)
+	bottom_controls.add_child(dock_market_btn)
+
+func _select_crop(crop_id: String):
+	GameState.selected_crop = crop_id
+	var c = GameData.CROPS[crop_id]
+	_show_message("Equipped %s seeds (Cost: %dc)" % [c["name"], c["cost"]], false)
+	_refresh_gardener_dock()
+	if seed_drawer:
+		seed_drawer.visible = false
 
 func _setup_map_buttons():
 	for child in map_grid.get_children():
@@ -303,10 +376,21 @@ func _setup_map_buttons():
 			btn.pressed.connect(func(): _on_map_sector_clicked(coord))
 			map_grid.add_child(btn)
 
-func _select_crop(crop_id: String):
-	GameState.selected_crop = crop_id
-	var c = GameData.CROPS[crop_id]
-	_show_message("Selected: %s (Cost: %dc)" % [c["name"], c["cost"]], false)
+func _refresh_gardener_dock():
+	if dock_barn_btn:
+		dock_barn_btn.text = "🎒 Barn (%d/10)" % GameState.get_barn_used_slots()
+		
+	if dock_active_seed_btn:
+		var c = GameData.CROPS.get(GameState.selected_crop, {})
+		dock_active_seed_btn.text = "🌱 Seed: %s (%dc) ▼" % [c.get("name", "Wheat"), c.get("cost", 10)]
+		
+	if dock_tool_btn:
+		var cur_tool = GameState.get_tool_info()
+		if GameState.tool_tier < GameData.TOOL_TIERS.size() - 1:
+			var next_tool = GameData.TOOL_TIERS[GameState.tool_tier + 1]
+			dock_tool_btn.text = "🪓 %s\nUp: %dc %dw %ds" % [cur_tool["name"], next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
+		else:
+			dock_tool_btn.text = "🪓 %s\n(Max Tier)" % cur_tool["name"]
 
 func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
@@ -350,15 +434,13 @@ func _refresh_ui():
 	var s_info = GameData.SECTORS.get(GameState.current_sector_coord, {})
 	sector_title.text = "%s (%s)" % [s_info.get("name", "Farm"), GameState.current_sector_coord]
 	
-	var cur_tool = GameState.get_tool_info()
-	if GameState.tool_tier < GameData.TOOL_TIERS.size() - 1:
-		var next_tool = GameData.TOOL_TIERS[GameState.tool_tier + 1]
-		tool_btn.text = "%s\nUpgrade: %dc %dw %ds" % [cur_tool["name"], next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
-	else:
-		tool_btn.text = "%s\n(Max Tier)" % cur_tool["name"]
-	
 	if barn_btn:
 		barn_btn.text = "Barn (%d/10)" % GameState.get_barn_used_slots()
+		
+	_refresh_gardener_dock()
+	
+	if market_modal and market_modal.visible:
+		_refresh_market_modal()
 	
 	for i in range(16):
 		_render_plot(i)
@@ -818,3 +900,326 @@ func _on_barn_slot_clicked(slot_idx: int):
 		]
 	else:
 		barn_detail_label.text = "Empty Storage Slot (%d of 10) • Harvested crops are stored here automatically!" % (slot_idx + 1)
+
+# Seed Pouch Drawer (Scalable seed selection popup)
+func _build_seed_drawer():
+	seed_drawer = PanelContainer.new()
+	seed_drawer.name = "SeedDrawer"
+	seed_drawer.visible = false
+	
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.16, 0.10, 0.06, 0.96)
+	sb.set_border_width_all(2)
+	sb.border_color = Color(1.0, 0.82, 0.35, 0.9)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
+	seed_drawer.add_theme_stylebox_override("panel", sb)
+	
+	seed_drawer.anchors_preset = Control.PRESET_BOTTOM_WIDE
+	seed_drawer.offset_top = -220
+	seed_drawer.offset_bottom = -76
+	seed_drawer.offset_left = 180
+	seed_drawer.offset_right = -180
+	$HUD.add_child(seed_drawer)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	seed_drawer.add_child(vbox)
+	
+	var header = Label.new()
+	header.text = "🌱 SEED POUCH • SELECT SEED TO PLANT"
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_theme_font_size_override("font_size", 14)
+	header.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
+	vbox.add_child(header)
+	
+	seed_drawer_grid = GridContainer.new()
+	seed_drawer_grid.columns = 4
+	seed_drawer_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_drawer_grid.add_theme_constant_override("h_separation", 12)
+	seed_drawer_grid.add_theme_constant_override("v_separation", 8)
+	vbox.add_child(seed_drawer_grid)
+	
+	for crop_id in GameData.CROPS:
+		var c = GameData.CROPS[crop_id]
+		var item_info = GameData.get_item_info(crop_id)
+		
+		var card = Button.new()
+		card.custom_minimum_size = Vector2(130, 72)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		var card_sb = StyleBoxFlat.new()
+		card_sb.bg_color = Color(0.22, 0.15, 0.09, 0.92)
+		card_sb.set_border_width_all(2)
+		card_sb.border_color = Color(0.55, 0.42, 0.25, 0.7)
+		card_sb.set_corner_radius_all(8)
+		card.add_theme_stylebox_override("normal", card_sb)
+		
+		var card_h = card_sb.duplicate()
+		card_h.border_color = Color(1.0, 0.85, 0.35, 1.0)
+		card_h.bg_color = Color(0.30, 0.20, 0.12, 0.98)
+		card.add_theme_stylebox_override("hover", card_h)
+		card.add_theme_stylebox_override("pressed", card_h)
+		
+		var inner = HBoxContainer.new()
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		inner.anchors_preset = Control.PRESET_FULL_RECT
+		inner.offset_left = 6
+		inner.offset_right = -6
+		inner.offset_top = 4
+		inner.offset_bottom = -4
+		card.add_child(inner)
+		
+		var ic = TextureRect.new()
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		ic.custom_minimum_size = Vector2(44, 44)
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if item_info.get("icon", "") != "":
+			ic.texture = load(item_info["icon"])
+		inner.add_child(ic)
+		
+		var d_vbox = VBoxContainer.new()
+		d_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		d_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		inner.add_child(d_vbox)
+		
+		var name_lbl = Label.new()
+		name_lbl.text = c["name"]
+		name_lbl.add_theme_font_size_override("font_size", 13)
+		name_lbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85, 1.0))
+		d_vbox.add_child(name_lbl)
+		
+		var cost_lbl = Label.new()
+		cost_lbl.text = "%dc • %ds" % [c["cost"], int(c["grow_time"])]
+		cost_lbl.add_theme_font_size_override("font_size", 11)
+		cost_lbl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.25, 0.95))
+		d_vbox.add_child(cost_lbl)
+		
+		var target_id = crop_id
+		card.pressed.connect(func(): _select_crop(target_id))
+		seed_drawer_grid.add_child(card)
+
+func _toggle_seed_drawer():
+	if seed_drawer:
+		seed_drawer.visible = not seed_drawer.visible
+
+# Town Market & Farm Stand Modal (Selling crops from the Barn)
+func _build_market_modal():
+	market_modal = Control.new()
+	market_modal.name = "MarketModal"
+	market_modal.anchors_preset = Control.PRESET_FULL_RECT
+	market_modal.visible = false
+	$HUD.add_child(market_modal)
+	
+	# Dimmed overlay
+	var overlay = ColorRect.new()
+	overlay.anchors_preset = Control.PRESET_FULL_RECT
+	overlay.color = Color(0, 0, 0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if event is InputEventMouseButton and event.pressed:
+			market_modal.visible = false
+	)
+	market_modal.add_child(overlay)
+	
+	var center = CenterContainer.new()
+	center.anchors_preset = Control.PRESET_FULL_RECT
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	market_modal.add_child(center)
+	
+	# Market Stall Panel
+	var panel = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(740, 500)
+	var psb = StyleBoxFlat.new()
+	psb.bg_color = Color(0.18, 0.12, 0.08, 0.98)
+	psb.set_border_width_all(3)
+	psb.border_color = Color(0.85, 0.65, 0.25, 1.0)
+	psb.set_corner_radius_all(14)
+	psb.content_margin_left = 24
+	psb.content_margin_right = 24
+	psb.content_margin_top = 18
+	psb.content_margin_bottom = 18
+	panel.add_theme_stylebox_override("panel", psb)
+	center.add_child(panel)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	panel.add_child(vbox)
+	
+	# Top bar of modal: Title & Close
+	var top_h = HBoxContainer.new()
+	vbox.add_child(top_h)
+	
+	var title = Label.new()
+	title.text = "🏪 TOWN MARKET & FARM STAND"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
+	top_h.add_child(title)
+	
+	var close_btn = Button.new()
+	close_btn.text = " [X] Close "
+	close_btn.pressed.connect(func(): market_modal.visible = false)
+	top_h.add_child(close_btn)
+	
+	# Subtitle / Balance
+	var sub_h = HBoxContainer.new()
+	vbox.add_child(sub_h)
+	
+	var sub = Label.new()
+	sub.text = "Sell your harvested crops from the Barn for gold coins!"
+	sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
+	sub_h.add_child(sub)
+	
+	market_balance_label = Label.new()
+	market_balance_label.text = "Your Coins: %dc" % GameState.coins
+	market_balance_label.add_theme_font_size_override("font_size", 15)
+	market_balance_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.25, 1.0))
+	sub_h.add_child(market_balance_label)
+	
+	# Scroll area for items stored in Barn
+	var scroll = ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 300)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(scroll)
+	
+	market_items_vbox = VBoxContainer.new()
+	market_items_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	market_items_vbox.add_theme_constant_override("separation", 8)
+	scroll.add_child(market_items_vbox)
+	
+	market_empty_label = Label.new()
+	market_empty_label.text = "Your Barn has no crops yet!\nGrow and harvest crops on your farm to store and sell them here."
+	market_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	market_empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	market_empty_label.custom_minimum_size = Vector2(0, 180)
+	market_empty_label.add_theme_font_size_override("font_size", 15)
+	market_empty_label.add_theme_color_override("font_color", Color(0.7, 0.65, 0.55, 0.7))
+	market_items_vbox.add_child(market_empty_label)
+	
+	# Bottom Action Bar: Sell All
+	var bottom_h = HBoxContainer.new()
+	bottom_h.add_theme_constant_override("separation", 16)
+	vbox.add_child(bottom_h)
+	
+	var sell_all_btn = Button.new()
+	sell_all_btn.name = "SellAllBtn"
+	sell_all_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sell_all_btn.custom_minimum_size = Vector2(0, 44)
+	sell_all_btn.text = "💰 Sell Entire Barn Harvest"
+	sell_all_btn.add_theme_font_size_override("font_size", 14)
+	
+	var sb_green = StyleBoxFlat.new()
+	sb_green.bg_color = Color(0.18, 0.35, 0.16, 0.95)
+	sb_green.set_border_width_all(2)
+	sb_green.border_color = Color(0.60, 0.95, 0.45, 0.9)
+	sb_green.set_corner_radius_all(8)
+	sell_all_btn.add_theme_stylebox_override("normal", sb_green)
+	
+	var sb_gh = sb_green.duplicate()
+	sb_gh.bg_color = Color(0.24, 0.45, 0.20, 1.0)
+	sb_gh.border_color = Color(0.80, 1.0, 0.60, 1.0)
+	sell_all_btn.add_theme_stylebox_override("hover", sb_gh)
+	sell_all_btn.add_theme_stylebox_override("pressed", sb_gh)
+	sell_all_btn.pressed.connect(_on_market_sell_all_pressed)
+	bottom_h.add_child(sell_all_btn)
+
+func _open_market_modal():
+	if seed_drawer:
+		seed_drawer.visible = false
+	market_modal.visible = true
+	_refresh_market_modal()
+
+func _refresh_market_modal():
+	if not market_modal or not market_items_vbox:
+		return
+		
+	market_balance_label.text = "Your Coins: %dc" % GameState.coins
+	
+	# Clear previous rows (except empty label)
+	for child in market_items_vbox.get_children():
+		if child != market_empty_label:
+			child.queue_free()
+			
+	var has_items = GameState.barn_inventory.size() > 0
+	market_empty_label.visible = not has_items
+	
+	for i in range(GameState.barn_inventory.size()):
+		var slot = GameState.barn_inventory[i]
+		var item_info = GameData.get_item_info(slot["id"])
+		var count = slot["count"]
+		var unit_price = item_info.get("sell_value", 10)
+		var total_price = unit_price * count
+		
+		var row = PanelContainer.new()
+		var rsb = StyleBoxFlat.new()
+		rsb.bg_color = Color(0.24, 0.17, 0.11, 0.92)
+		rsb.set_border_width_all(1)
+		rsb.border_color = Color(0.55, 0.42, 0.25, 0.6)
+		rsb.set_corner_radius_all(8)
+		rsb.content_margin_left = 12
+		rsb.content_margin_right = 12
+		rsb.content_margin_top = 8
+		rsb.content_margin_bottom = 8
+		row.add_theme_stylebox_override("panel", rsb)
+		
+		var rh = HBoxContainer.new()
+		rh.add_theme_constant_override("separation", 14)
+		row.add_child(rh)
+		
+		# Icon
+		var ic = TextureRect.new()
+		ic.custom_minimum_size = Vector2(44, 44)
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		if item_info.get("icon", "") != "":
+			ic.texture = load(item_info["icon"])
+		rh.add_child(ic)
+		
+		# Name & Count
+		var name_v = VBoxContainer.new()
+		name_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rh.add_child(name_v)
+		
+		var nl = Label.new()
+		nl.text = "%s (x%d in Barn)" % [item_info["name"], count]
+		nl.add_theme_font_size_override("font_size", 14)
+		nl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85, 1.0))
+		name_v.add_child(nl)
+		
+		var pl = Label.new()
+		pl.text = "Value: +%dc each • Total: +%dc" % [unit_price, total_price]
+		pl.add_theme_font_size_override("font_size", 12)
+		pl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35, 0.95))
+		name_v.add_child(pl)
+		
+		# Sell 1 Button
+		var s1 = Button.new()
+		s1.text = " Sell 1 (+%dc) " % unit_price
+		var slot_idx = i
+		s1.pressed.connect(func():
+			GameState.sell_from_barn(slot_idx, 1)
+			_refresh_market_modal()
+		)
+		rh.add_child(s1)
+		
+		# Sell All Button
+		var sa = Button.new()
+		sa.text = " Sell All (+%dc) " % total_price
+		sa.pressed.connect(func():
+			GameState.sell_from_barn(slot_idx, count)
+			_refresh_market_modal()
+		)
+		rh.add_child(sa)
+		
+		market_items_vbox.add_child(row)
+
+func _on_market_sell_all_pressed():
+	GameState.sell_all_from_barn()
+	_refresh_market_modal()

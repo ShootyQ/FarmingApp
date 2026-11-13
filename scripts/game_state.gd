@@ -395,3 +395,50 @@ func add_to_barn(item_id: String, amount: int = 1) -> bool:
 
 func get_barn_used_slots() -> int:
 	return barn_inventory.size()
+
+# Selling items from Barn to Market / Vendor
+func sell_from_barn(slot_idx: int, amount: int = 1) -> bool:
+	if slot_idx < 0 or slot_idx >= barn_inventory.size():
+		return false
+	var slot = barn_inventory[slot_idx]
+	var count = slot.get("count", 0)
+	var sell_amount = min(amount, count)
+	if sell_amount <= 0:
+		return false
+		
+	var item_info = GameData.get_item_info(slot["id"])
+	var unit_price = item_info.get("sell_value", 10)
+	var total_payout = unit_price * sell_amount
+	
+	coins += total_payout
+	slot["count"] -= sell_amount
+	
+	if slot["count"] <= 0:
+		barn_inventory.remove_at(slot_idx)
+		
+	save_game()
+	state_updated.emit()
+	barn_updated.emit()
+	message_broadcast.emit("Sold %d %s for +%dc!" % [sell_amount, item_info["name"], total_payout], true)
+	return true
+
+func sell_all_from_barn() -> int:
+	var total_payout = 0
+	var total_items = 0
+	for slot in barn_inventory:
+		var item_info = GameData.get_item_info(slot["id"])
+		var unit_price = item_info.get("sell_value", 10)
+		total_payout += unit_price * slot["count"]
+		total_items += slot["count"]
+	
+	if total_payout == 0:
+		message_broadcast.emit("No crops in the Barn to sell!", false)
+		return 0
+		
+	coins += total_payout
+	barn_inventory.clear()
+	save_game()
+	state_updated.emit()
+	barn_updated.emit()
+	message_broadcast.emit("Sold entire barn harvest (%d items) for +%dc!" % [total_items, total_payout], true)
+	return total_payout
