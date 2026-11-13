@@ -60,6 +60,15 @@ var tex_pumpkin_vine = preload("res://assets/objects/pumpkin_vine.png")
 var tex_pumpkin_mature = preload("res://assets/objects/pumpkin_mature.png")
 var tex_pumpkin_haunted = preload("res://assets/objects/pumpkin_haunted.png")
 
+# Barn & Storage
+var tex_barn = preload("res://assets/objects/barn.png")
+var tex_barn_interior = preload("res://assets/ui/barn_interior.png")
+var barn_modal: Control
+var barn_slots_container: GridContainer
+var barn_title_label: Label
+var barn_detail_label: Label
+var barn_btn: Button
+
 # Obstacle Variations: Weeds (4), Logs (2), Rocks (3)
 var tex_weeds = [
 	preload("res://assets/objects/weed_0.png"), # Thistle
@@ -90,14 +99,22 @@ func _ready():
 	_build_isometric_grid()
 	_setup_seed_buttons()
 	_setup_map_buttons()
+	_build_barn_modal()
 	
 	GameState.state_updated.connect(_refresh_ui)
 	GameState.tile_updated.connect(_on_tile_updated)
 	GameState.message_broadcast.connect(_show_message)
+	GameState.barn_opened.connect(_open_barn_modal)
+	GameState.barn_updated.connect(_refresh_barn_modal)
 	
 	tool_btn.pressed.connect(_on_tool_upgrade_pressed)
 	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.pressed.connect(func(): map_modal.visible = true)
 	$HUD/MapModal/Panel/VBox/CloseMapBtn.pressed.connect(func(): map_modal.visible = false)
+	
+	barn_btn = Button.new()
+	barn_btn.text = "Barn (0/10)"
+	barn_btn.pressed.connect(_open_barn_modal)
+	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(barn_btn)
 	
 	_select_crop("wheat")
 	_refresh_ui()
@@ -340,6 +357,9 @@ func _refresh_ui():
 	else:
 		tool_btn.text = "%s\n(Max Tier)" % cur_tool["name"]
 	
+	if barn_btn:
+		barn_btn.text = "Barn (%d/10)" % GameState.get_barn_used_slots()
+	
 	for i in range(16):
 		_render_plot(i)
 	
@@ -364,6 +384,17 @@ func _render_plot(idx: int):
 	var type = tile.get("type", "grass")
 	
 	match type:
+		"barn":
+			soil_sprite.visible = false
+			obj_sprite.visible = true
+			obj_sprite.texture = tex_barn
+			obj_sprite.scale = Vector2(0.90, 0.90)
+			obj_sprite.offset = Vector2(0, -96)
+			obj_sprite.modulate = Color.WHITE
+			badge.position = Vector2(-70, -145)
+			badge.text = "Red Barn [Storage]"
+			badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
+		
 		"grass":
 			soil_sprite.visible = false
 			obj_sprite.visible = false
@@ -591,3 +622,199 @@ func _on_tile_updated(coord: String, tile_idx: int):
 func _show_message(text: String, is_reward: bool):
 	status_banner.text = text
 	status_banner.modulate = Color(1.0, 0.92, 0.3) if is_reward else Color(1.0, 1.0, 1.0)
+
+# Barn Storage UI Modal (10 slots, stacks of 10 max)
+func _build_barn_modal():
+	barn_modal = Control.new()
+	barn_modal.name = "BarnModal"
+	barn_modal.anchors_preset = Control.PRESET_FULL_RECT
+	barn_modal.visible = false
+	$HUD.add_child(barn_modal)
+	
+	# Dimmed dark overlay
+	var overlay = ColorRect.new()
+	overlay.anchors_preset = Control.PRESET_FULL_RECT
+	overlay.color = Color(0, 0, 0, 0.70)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if event is InputEventMouseButton and event.pressed:
+			barn_modal.visible = false
+	)
+	barn_modal.add_child(overlay)
+	
+	# Center container for barn interior frame
+	var center = CenterContainer.new()
+	center.anchors_preset = Control.PRESET_FULL_RECT
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	barn_modal.add_child(center)
+	
+	# Barn Interior Card / TextureRect
+	var frame = TextureRect.new()
+	frame.texture = tex_barn_interior
+	frame.custom_minimum_size = Vector2(860, 640)
+	frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	frame.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	center.add_child(frame)
+	
+	# Close button (top right)
+	var close_btn = Button.new()
+	close_btn.text = " [X] Close "
+	close_btn.position = Vector2(740, 24)
+	close_btn.custom_minimum_size = Vector2(90, 36)
+	close_btn.pressed.connect(func(): barn_modal.visible = false)
+	frame.add_child(close_btn)
+	
+	# Title Banner
+	barn_title_label = Label.new()
+	barn_title_label.position = Vector2(100, 28)
+	barn_title_label.size = Vector2(660, 36)
+	barn_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	barn_title_label.text = "RED BARN STORAGE (0 / 10 Slots)"
+	barn_title_label.add_theme_font_size_override("font_size", 22)
+	barn_title_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+	barn_title_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
+	barn_title_label.add_theme_constant_override("shadow_offset_x", 2)
+	barn_title_label.add_theme_constant_override("shadow_offset_y", 2)
+	frame.add_child(barn_title_label)
+	
+	# Subtitle / Hint
+	var sub_label = Label.new()
+	sub_label.position = Vector2(100, 66)
+	sub_label.size = Vector2(660, 24)
+	sub_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_label.text = "Harvested crops automatically store here • Up to 10 items per stack"
+	sub_label.add_theme_font_size_override("font_size", 14)
+	sub_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.7, 0.9))
+	sub_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	sub_label.add_theme_constant_override("shadow_offset_x", 1)
+	sub_label.add_theme_constant_override("shadow_offset_y", 1)
+	frame.add_child(sub_label)
+	
+	# Grid Container (5 cols x 2 rows = 10 slots) positioned in the central counter
+	barn_slots_container = GridContainer.new()
+	barn_slots_container.columns = 5
+	barn_slots_container.position = Vector2(150, 230)
+	barn_slots_container.size = Vector2(560, 220)
+	barn_slots_container.add_theme_constant_override("h_separation", 16)
+	barn_slots_container.add_theme_constant_override("v_separation", 16)
+	frame.add_child(barn_slots_container)
+	
+	for i in range(10):
+		var slot_btn = Button.new()
+		slot_btn.custom_minimum_size = Vector2(96, 96)
+		slot_btn.name = "Slot_%d" % i
+		slot_btn.clip_contents = true
+		
+		# Inset panel styling
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.16, 0.11, 0.07, 0.88)
+		sb.set_border_width_all(2)
+		sb.border_color = Color(0.65, 0.48, 0.22, 0.75)
+		sb.set_corner_radius_all(8)
+		slot_btn.add_theme_stylebox_override("normal", sb)
+		
+		var sb_h = sb.duplicate()
+		sb_h.border_color = Color(1.0, 0.85, 0.35, 1.0)
+		sb_h.bg_color = Color(0.24, 0.16, 0.10, 0.95)
+		slot_btn.add_theme_stylebox_override("hover", sb_h)
+		slot_btn.add_theme_stylebox_override("pressed", sb_h)
+		
+		# Icon
+		var icon = TextureRect.new()
+		icon.name = "Icon"
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.size = Vector2(56, 56)
+		icon.position = Vector2(20, 14)
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_btn.add_child(icon)
+		
+		# Item Name (Top)
+		var name_lbl = Label.new()
+		name_lbl.name = "ItemName"
+		name_lbl.size = Vector2(96, 20)
+		name_lbl.position = Vector2(0, 4)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_color_override("font_color", Color(0.95, 0.9, 0.75, 0.95))
+		name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_btn.add_child(name_lbl)
+		
+		# Count badge (bottom right)
+		var count_lbl = Label.new()
+		count_lbl.name = "CountBadge"
+		count_lbl.size = Vector2(90, 22)
+		count_lbl.position = Vector2(0, 70)
+		count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		count_lbl.add_theme_font_size_override("font_size", 13)
+		count_lbl.add_theme_color_override("font_color", Color(1.0, 0.88, 0.2, 1.0))
+		count_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 1.0))
+		count_lbl.add_theme_constant_override("shadow_offset_x", 1)
+		count_lbl.add_theme_constant_override("shadow_offset_y", 1)
+		count_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_btn.add_child(count_lbl)
+		
+		var slot_idx = i
+		slot_btn.pressed.connect(func(): _on_barn_slot_clicked(slot_idx))
+		barn_slots_container.add_child(slot_btn)
+		
+	# Item detail inspection box (bottom)
+	barn_detail_label = Label.new()
+	barn_detail_label.position = Vector2(100, 475)
+	barn_detail_label.size = Vector2(660, 48)
+	barn_detail_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	barn_detail_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	barn_detail_label.text = "Click any item to inspect details"
+	barn_detail_label.add_theme_font_size_override("font_size", 14)
+	barn_detail_label.add_theme_color_override("font_color", Color(0.98, 0.94, 0.8, 1.0))
+	barn_detail_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
+	barn_detail_label.add_theme_constant_override("shadow_offset_x", 1)
+	barn_detail_label.add_theme_constant_override("shadow_offset_y", 1)
+	frame.add_child(barn_detail_label)
+
+func _open_barn_modal():
+	barn_modal.visible = true
+	_refresh_barn_modal()
+
+func _refresh_barn_modal():
+	if not barn_modal or not barn_slots_container:
+		return
+	var count = GameState.get_barn_used_slots()
+	barn_title_label.text = "RED BARN STORAGE (%d / 10 Slots)" % count
+	
+	for i in range(10):
+		var btn = barn_slots_container.get_child(i) as Button
+		var icon = btn.get_node("Icon") as TextureRect
+		var name_lbl = btn.get_node("ItemName") as Label
+		var count_lbl = btn.get_node("CountBadge") as Label
+		
+		if i < GameState.barn_inventory.size():
+			var item = GameState.barn_inventory[i]
+			var info = GameData.get_item_info(item["id"])
+			name_lbl.text = item.get("name", "Crop")
+			count_lbl.text = "x%d" % item.get("count", 1)
+			if info.get("icon", "") != "":
+				icon.texture = load(info["icon"])
+				icon.visible = true
+			else:
+				icon.visible = false
+			name_lbl.visible = true
+			count_lbl.visible = true
+			name_lbl.add_theme_color_override("font_color", Color(0.95, 0.9, 0.75, 0.95))
+		else:
+			count_lbl.text = ""
+			icon.visible = false
+			name_lbl.text = "[ Empty ]"
+			name_lbl.visible = true
+			name_lbl.add_theme_color_override("font_color", Color(0.65, 0.55, 0.45, 0.5))
+
+func _on_barn_slot_clicked(slot_idx: int):
+	if slot_idx < GameState.barn_inventory.size():
+		var item = GameState.barn_inventory[slot_idx]
+		var info = GameData.get_item_info(item["id"])
+		barn_detail_label.text = "%s (x%d in stock) • Sell Value: %dc each\n\"%s\"" % [
+			info["name"], item["count"], info["sell_value"], info["desc"]
+		]
+	else:
+		barn_detail_label.text = "Empty Storage Slot (%d of 10) • Harvested crops are stored here automatically!" % (slot_idx + 1)

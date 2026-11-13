@@ -107,6 +107,66 @@ const OBSTACLES = {
 	}
 }
 
+# Item Database (Produce & Materials stored in Barn)
+const ITEMS = {
+	"wheat": {
+		"name": "Wheat",
+		"sell_value": 25,
+		"icon": "res://assets/objects/wheat_mature.png",
+		"desc": "Crisp golden stalks of farm-fresh wheat."
+	},
+	"golden_wheat": {
+		"name": "Golden Wheat ★",
+		"sell_value": 100,
+		"icon": "res://assets/objects/wheat_legendary.png",
+		"desc": "Rare golden-sheaf wheat glowing with sun energy."
+	},
+	"carrot": {
+		"name": "Carrot",
+		"sell_value": 65,
+		"icon": "res://assets/objects/carrot_mature.png",
+		"desc": "Sweet, crunchy heirloom orange carrot."
+	},
+	"crystal_carrot": {
+		"name": "Crystal Carrot ★",
+		"sell_value": 250,
+		"icon": "res://assets/objects/carrot_crystal.png",
+		"desc": "A legendary prismatic crystalline root."
+	},
+	"strawberry": {
+		"name": "Strawberry",
+		"sell_value": 160,
+		"icon": "res://assets/objects/strawberry_mature.png",
+		"desc": "Plump, sun-ripened red garden strawberry."
+	},
+	"jeweled_berry": {
+		"name": "Jeweled Berry ★",
+		"sell_value": 600,
+		"icon": "res://assets/objects/strawberry_jeweled.png",
+		"desc": "Glittering ruby gemstone strawberry fit for royalty."
+	},
+	"pumpkin": {
+		"name": "Pumpkin",
+		"sell_value": 450,
+		"icon": "res://assets/objects/pumpkin_mature.png",
+		"desc": "A hearty, heavy autumn prize pumpkin."
+	},
+	"haunted_pumpkin": {
+		"name": "Haunted Pumpkin ★",
+		"sell_value": 1800,
+		"icon": "res://assets/objects/pumpkin_haunted.png",
+		"desc": "Spooky glowing purple pumpkin with mysterious essence."
+	}
+}
+
+func get_item_info(item_id: String) -> Dictionary:
+	return ITEMS.get(item_id, {
+		"name": item_id.capitalize(),
+		"sell_value": 10,
+		"icon": "",
+		"desc": "Farm produce stored safely in the barn."
+	})
+
 # Tool Tiers
 const TOOL_TIERS = [
 	{

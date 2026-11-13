@@ -6,6 +6,8 @@ extends Node
 signal state_updated
 signal tile_updated(sector_coord: String, tile_idx: int)
 signal message_broadcast(text: String, is_reward: bool)
+signal barn_opened
+signal barn_updated
 
 var coins: int = 150
 var wood: int = 10
@@ -15,6 +17,11 @@ var relics: int = 0
 var tool_tier: int = 0
 var selected_crop: String = "wheat"
 var current_sector_coord: String = "1,1"
+
+# Barn Storage: 10 spaces, stack size up to 10
+const BARN_SLOTS_MAX: int = 10
+const BARN_STACK_MAX: int = 10
+var barn_inventory: Array = []
 
 # Unlocked sectors list
 var unlocked_sectors: Array[String] = ["1,1"]
@@ -106,6 +113,11 @@ func _generate_sector_tiles(coord: String):
 				"plant_time": 0.0,
 				"grow_duration": 0.0
 			}
+		elif is_homestead and i == 0:
+			# Red Barn building on the homestead
+			tile = {
+				"type": "barn"
+			}
 		else:
 			# Random obstacle or clear grass based on sector
 			var roll = randf()
@@ -153,6 +165,8 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 			_handle_tap_soil(sector_coord, tile_idx, tile)
 		"grass":
 			_handle_tap_grass(sector_coord, tile_idx, tile)
+		"barn":
+			barn_opened.emit()
 	
 	tile_updated.emit(sector_coord, tile_idx)
 	state_updated.emit()
@@ -235,17 +249,28 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 			message_broadcast.emit("Not enough coins for seeds! Need %dc" % cost, false)
 			
 	elif state == "ready":
-		# Harvest crop
-		var crop_data = GameData.CROPS[tile["crop"]]
+		# Harvest crop directly into Barn storage (no direct coins)
 		var is_mutated = tile.get("is_mutated", false)
-		var payout = crop_data["mutated_reward"] if is_mutated else crop_data["reward"]
-		var crop_title = crop_data["mutated_name"] if is_mutated else crop_data["name"]
-		
-		coins += payout
+		var item_id = tile["crop"]
 		if is_mutated:
-			message_broadcast.emit("★ LEGENDARY HARVEST! %s (+%dc)!" % [crop_title, payout], true)
+			match tile["crop"]:
+				"wheat": item_id = "golden_wheat"
+				"carrot": item_id = "crystal_carrot"
+				"strawberry": item_id = "jeweled_berry"
+				"pumpkin": item_id = "haunted_pumpkin"
+		
+		var item_info = GameData.get_item_info(item_id)
+		
+		# Attempt to store in Barn (10 slots max, 10 per stack)
+		var added = add_to_barn(item_id, 1)
+		if not added:
+			message_broadcast.emit("Barn is full! (10/10 slots). Click the Barn to inspect.", false)
+			return
+			
+		if is_mutated:
+			message_broadcast.emit("★ LEGENDARY HARVEST! Stored %s in Barn!" % item_info["name"], true)
 		else:
-			message_broadcast.emit("Harvested %s%s (+%dc)!" % [crop_data["emoji"], crop_title, payout], true)
+			message_broadcast.emit("Harvested %s! Stored in Barn." % item_info["name"], true)
 		
 		# Reset soil to empty
 		tile["state"] = "empty"
@@ -284,6 +309,7 @@ func save_game():
 		"current_sector": current_sector_coord,
 		"unlocked_sectors": unlocked_sectors,
 		"sector_tiles": sector_tiles,
+		"barn_inventory": barn_inventory,
 		"save_time": Time.get_unix_time_from_system()
 	}
 	var file = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -323,5 +349,49 @@ func load_game():
 	if not "1,1" in sector_tiles:
 		_generate_sector_tiles("1,1")
 	
+	# Load barn storage
+	barn_inventory = parsed.get("barn_inventory", [])
+	
+	# Ensure Homestead tile 0 is always the Red Barn
+	var h_tiles = sector_tiles.get("1,1", [])
+	if h_tiles.size() > 0:
+		h_tiles[0] = {"type": "barn"}
+	
 	# Calculate offline crop growth
 	update_crop_timers()
+
+# Barn Inventory Management (10 slots, stack of 10 max)
+func add_to_barn(item_id: String, amount: int = 1) -> bool:
+	var item_info = GameData.get_item_info(item_id)
+	var remaining = amount
+	
+	# Pass 1: Try stacking into existing slots
+	for slot in barn_inventory:
+		if slot.get("id") == item_id and slot.get("count", 0) < BARN_STACK_MAX:
+			var can_add = min(remaining, BARN_STACK_MAX - slot["count"])
+			slot["count"] += can_add
+			remaining -= can_add
+			if remaining <= 0:
+				save_game()
+				barn_updated.emit()
+				return true
+				
+	# Pass 2: Fill empty slots if barn has fewer than 10 slots
+	while remaining > 0 and barn_inventory.size() < BARN_SLOTS_MAX:
+		var take = min(remaining, BARN_STACK_MAX)
+		barn_inventory.append({
+			"id": item_id,
+			"name": item_info.get("name", item_id.capitalize()),
+			"count": take,
+			"sell_value": item_info.get("sell_value", 10),
+			"icon": item_info.get("icon", ""),
+			"desc": item_info.get("desc", "")
+		})
+		remaining -= take
+		
+	save_game()
+	barn_updated.emit()
+	return remaining == 0
+
+func get_barn_used_slots() -> int:
+	return barn_inventory.size()
