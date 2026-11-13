@@ -32,7 +32,7 @@ jobs:
           relative_project_path: ./
           use_preset_export_path: true
           archive_output: false
-          cache: true
+          cache: false
 
       - name: Move Files to Root Directory
         run: |
@@ -41,7 +41,9 @@ jobs:
             rm -rf build/web/Web
           fi
           touch build/web/.nojekyll
-          sed -i 's/<head>/<head><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">/g' build/web/index.html
+          sed -i 's/<head>/<head><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">/g' build/web/index.html
+          sed -i 's/"executable":"index"/"executable":"index","mainPack":"index.pck?v='${{ github.sha }}'"/g' build/web/index.html
+          sed -i 's/"index.js"/"index.js?v='${{ github.sha }}'"/g' build/web/index.html
 
       # Option A: Deploy directly to gh-pages branch (classic GitHub Pages)
       - name: Deploy to gh-pages branch
