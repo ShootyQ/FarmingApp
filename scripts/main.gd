@@ -34,15 +34,31 @@ var tex_grass = [
 ]
 var tex_soil = preload("res://assets/tiles/iso_soil_flat.png")
 
-# Wheat growth stages
+# Crop Growth Stages
+# Wheat
 var tex_wheat_sprout = preload("res://assets/objects/wheat_sprout.png")
 var tex_wheat_growing = preload("res://assets/objects/wheat_growing.png")
 var tex_wheat_heading = preload("res://assets/objects/wheat_heading.png")
 var tex_wheat_mature = preload("res://assets/objects/wheat_mature.png")
 var tex_wheat_legendary = preload("res://assets/objects/wheat_legendary.png")
 
-var tex_carrot = preload("res://assets/objects/carrot_mature.png")
-var tex_berry = preload("res://assets/objects/berry_mature.png")
+# Carrot
+var tex_carrot_sprout = preload("res://assets/objects/carrot_sprout.png")
+var tex_carrot_growing = preload("res://assets/objects/carrot_growing.png")
+var tex_carrot_mature = preload("res://assets/objects/carrot_mature.png")
+var tex_carrot_crystal = preload("res://assets/objects/carrot_crystal.png")
+
+# Strawberry
+var tex_strawberry_sprout = preload("res://assets/objects/strawberry_sprout.png")
+var tex_strawberry_flowering = preload("res://assets/objects/strawberry_flowering.png")
+var tex_strawberry_mature = preload("res://assets/objects/strawberry_mature.png")
+var tex_strawberry_jeweled = preload("res://assets/objects/strawberry_jeweled.png")
+
+# Pumpkin
+var tex_pumpkin_sprout = preload("res://assets/objects/pumpkin_sprout.png")
+var tex_pumpkin_vine = preload("res://assets/objects/pumpkin_vine.png")
+var tex_pumpkin_mature = preload("res://assets/objects/pumpkin_mature.png")
+var tex_pumpkin_haunted = preload("res://assets/objects/pumpkin_haunted.png")
 
 # Obstacle Variations: Weeds (4), Logs (2), Rocks (3)
 var tex_weeds = [
@@ -403,17 +419,34 @@ func _render_plot(idx: int):
 				
 				# All growing stages use authentic 256x256 growth sprites centered in the middle of the diamond
 				obj_sprite.offset = Vector2(0, -96)
+				obj_sprite.scale = Vector2(0.60, 0.60)
 				badge.position = Vector2(-50, -90)
 				
-				if pct < 0.33:
-					obj_sprite.texture = tex_wheat_sprout
-				elif pct < 0.66:
-					obj_sprite.texture = tex_wheat_growing
-				else:
-					if crop_id == "wheat":
-						obj_sprite.texture = tex_wheat_heading
-					else:
-						obj_sprite.texture = tex_wheat_growing
+				match crop_id:
+					"wheat":
+						if pct < 0.33:
+							obj_sprite.texture = tex_wheat_sprout
+						elif pct < 0.66:
+							obj_sprite.texture = tex_wheat_growing
+						else:
+							obj_sprite.texture = tex_wheat_heading
+					"carrot":
+						if pct < 0.5:
+							obj_sprite.texture = tex_carrot_sprout
+						else:
+							obj_sprite.texture = tex_carrot_growing
+					"strawberry":
+						if pct < 0.5:
+							obj_sprite.texture = tex_strawberry_sprout
+						else:
+							obj_sprite.texture = tex_strawberry_flowering
+					"pumpkin":
+						if pct < 0.5:
+							obj_sprite.texture = tex_pumpkin_sprout
+						else:
+							obj_sprite.texture = tex_pumpkin_vine
+					_:
+						obj_sprite.texture = tex_wheat_sprout
 				
 				obj_sprite.modulate = Color.WHITE
 				var remain = max(0.0, total - elapsed)
@@ -422,42 +455,57 @@ func _render_plot(idx: int):
 			
 			elif state == "ready":
 				obj_sprite.visible = true
+				obj_sprite.offset = Vector2(0, -96)
+				obj_sprite.scale = Vector2(0.60, 0.60)
+				badge.position = Vector2(-50, -112)
+				
 				var crop_id = tile.get("crop", "wheat")
 				var is_mut = tile.get("is_mutated", false)
+				var c_data = GameData.CROPS.get(crop_id, {})
 				
 				match crop_id:
 					"wheat":
-						obj_sprite.offset = Vector2(0, -96)
-						badge.position = Vector2(-50, -112)
 						if is_mut:
 							obj_sprite.texture = tex_wheat_legendary
-							badge.text = "★GOLDEN!★ (+%dc)" % GameData.CROPS[crop_id]["mutated_reward"]
+							badge.text = "★GOLDEN!★ (+%dc)" % c_data.get("mutated_reward", 100)
 							badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
 						else:
 							obj_sprite.texture = tex_wheat_mature
-							badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
+							badge.text = "HARVEST! (+%dc)" % c_data.get("reward", 25)
 							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					"carrot":
-						obj_sprite.offset = Vector2(0, -18)
-						badge.position = Vector2(-50, -60)
-						obj_sprite.texture = tex_carrot
-						obj_sprite.modulate = Color.WHITE
-						badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
-						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+						if is_mut:
+							obj_sprite.texture = tex_carrot_crystal
+							badge.text = "★CRYSTAL!★ (+%dc)" % c_data.get("mutated_reward", 250)
+							badge.modulate = Color(0.4, 0.9, 1.0, 1.0)
+						else:
+							obj_sprite.texture = tex_carrot_mature
+							badge.text = "HARVEST! (+%dc)" % c_data.get("reward", 65)
+							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					"strawberry":
-						obj_sprite.offset = Vector2(0, -18)
-						badge.position = Vector2(-50, -60)
-						obj_sprite.texture = tex_berry
-						obj_sprite.modulate = Color.WHITE
-						badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
-						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+						if is_mut:
+							obj_sprite.texture = tex_strawberry_jeweled
+							badge.text = "★JEWELED!★ (+%dc)" % c_data.get("mutated_reward", 600)
+							badge.modulate = Color(1.0, 0.4, 0.8, 1.0)
+						else:
+							obj_sprite.texture = tex_strawberry_mature
+							badge.text = "HARVEST! (+%dc)" % c_data.get("reward", 160)
+							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+					"pumpkin":
+						if is_mut:
+							obj_sprite.texture = tex_pumpkin_haunted
+							badge.text = "★HAUNTED!★ (+%dc)" % c_data.get("mutated_reward", 1800)
+							badge.modulate = Color(0.7, 0.4, 1.0, 1.0)
+						else:
+							obj_sprite.texture = tex_pumpkin_mature
+							badge.text = "HARVEST! (+%dc)" % c_data.get("reward", 450)
+							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					_:
-						obj_sprite.offset = Vector2(0, -96)
-						badge.position = Vector2(-50, -112)
 						obj_sprite.texture = tex_wheat_mature
-						obj_sprite.modulate = Color.WHITE
 						badge.text = "HARVEST!"
 						badge.modulate = Color.WHITE
+				
+				obj_sprite.modulate = Color.WHITE
 
 func _update_active_crop_labels():
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
