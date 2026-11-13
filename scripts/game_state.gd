@@ -44,7 +44,7 @@ func upgrade_tool() -> bool:
 	wood -= next_tool["cost_wood"]
 	stone -= next_tool["cost_stone"]
 	tool_tier += 1
-	message_broadcast.emit("🎉 Upgraded to %s!" % next_tool["name"], true)
+	message_broadcast.emit("★ Upgraded to %s!" % next_tool["name"], true)
 	save_game()
 	state_updated.emit()
 	return true
@@ -79,13 +79,13 @@ func unlock_sector(coord: String) -> bool:
 	var sector_data = GameData.SECTORS.get(coord, {})
 	var cost = sector_data.get("cost", 999999)
 	if coins < cost:
-		message_broadcast.emit("Not enough coins! Need %d 🪙" % cost, false)
+		message_broadcast.emit("Not enough coins! Need %d c" % cost, false)
 		return false
 	
 	coins -= cost
 	unlocked_sectors.append(coord)
 	_generate_sector_tiles(coord)
-	message_broadcast.emit("🗺️ Unlocked %s!" % sector_data.get("name", "New Land"), true)
+	message_broadcast.emit(" Unlocked %s!" % sector_data.get("name", "New Land"), true)
 	save_game()
 	state_updated.emit()
 	return true
@@ -180,16 +180,16 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 		for res in data["drops"]:
 			var amount = data["drops"][res]
 			match res:
-				"coins": coins += amount; drop_text += "+%d🪙 " % amount
-				"wood": wood += amount; drop_text += "+%d🪵 " % amount
-				"stone": stone += amount; drop_text += "+%d🪨 " % amount
-				"relics": relics += amount; drop_text += "+%d🏺 " % amount
+				"coins": coins += amount; drop_text += "+%dc " % amount
+				"wood": wood += amount; drop_text += "+%d " % amount
+				"stone": stone += amount; drop_text += "+%d " % amount
+				"relics": relics += amount; drop_text += "+%d " % amount
 		
 		# Check relic chance
 		var relic_bonus = 1.5 if tool_tier >= 3 else 1.0
 		if randf() < (data["relic_chance"] * relic_bonus):
 			relics += 1
-			drop_text += "✨ Found Rare Relic!🏺"
+			drop_text += "★ Found Rare Relic!"
 		
 		# Turn tile into tilled soil ready for planting
 		tiles_become_soil(tile)
@@ -210,7 +210,7 @@ func _handle_tap_grass(sector_coord: String, tile_idx: int, tile: Dictionary):
 	if coins >= till_cost:
 		coins -= till_cost
 		tiles_become_soil(tile)
-		message_broadcast.emit("Tilled fertile soil plot! (-5🪙)", true)
+		message_broadcast.emit("Tilled fertile soil plot! (-5c)", true)
 	else:
 		message_broadcast.emit("Need 5 coins to till soil!", false)
 
@@ -232,7 +232,7 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 			tile["is_mutated"] = (randf() < crop_data["mutation_chance"])
 			message_broadcast.emit("Planted %s%s!" % [crop_data["emoji"], crop_data["name"]], true)
 		else:
-			message_broadcast.emit("Not enough coins for seeds! Need %d🪙" % cost, false)
+			message_broadcast.emit("Not enough coins for seeds! Need %dc" % cost, false)
 			
 	elif state == "ready":
 		# Harvest crop
@@ -243,9 +243,9 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 		
 		coins += payout
 		if is_mutated:
-			message_broadcast.emit("🌟 LEGENDARY HARVEST! %s (+%d🪙)!" % [crop_title, payout], true)
+			message_broadcast.emit("★ LEGENDARY HARVEST! %s (+%dc)!" % [crop_title, payout], true)
 		else:
-			message_broadcast.emit("Harvested %s%s (+%d🪙)!" % [crop_data["emoji"], crop_title, payout], true)
+			message_broadcast.emit("Harvested %s%s (+%dc)!" % [crop_data["emoji"], crop_title, payout], true)
 		
 		# Reset soil to empty
 		tile["state"] = "empty"

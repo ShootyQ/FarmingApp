@@ -6,45 +6,45 @@ const CROPS = {
 	"wheat": {
 		"id": "wheat",
 		"name": "Wheat",
-		"emoji": "🌾",
+		"emoji": "",
 		"cost": 10,
 		"reward": 25,
 		"grow_time": 5.0, # 5s for testing, easily tuned
 		"mutation_chance": 0.05,
-		"mutated_name": "Golden Wheat 🌟",
+		"mutated_name": "Golden Wheat ★",
 		"mutated_reward": 100
 	},
 	"carrot": {
 		"id": "carrot",
 		"name": "Carrot",
-		"emoji": "🥕",
+		"emoji": "",
 		"cost": 25,
 		"reward": 65,
 		"grow_time": 15.0,
 		"mutation_chance": 0.05,
-		"mutated_name": "Crystal Carrot 💎",
+		"mutated_name": "Crystal Carrot ★",
 		"mutated_reward": 250
 	},
 	"strawberry": {
 		"id": "strawberry",
 		"name": "Strawberry",
-		"emoji": "🍓",
+		"emoji": "",
 		"cost": 60,
 		"reward": 160,
 		"grow_time": 45.0,
 		"mutation_chance": 0.08,
-		"mutated_name": "Jeweled Berry 👑",
+		"mutated_name": "Jeweled Berry ★",
 		"mutated_reward": 600
 	},
 	"pumpkin": {
 		"id": "pumpkin",
 		"name": "Pumpkin",
-		"emoji": "🎃",
+		"emoji": "",
 		"cost": 150,
 		"reward": 450,
 		"grow_time": 120.0,
 		"mutation_chance": 0.10,
-		"mutated_name": "Haunted Pumpkin 👻",
+		"mutated_name": "Haunted Pumpkin ",
 		"mutated_reward": 1800
 	}
 }
@@ -54,7 +54,7 @@ const OBSTACLES = {
 	"weed": {
 		"id": "weed",
 		"name": "Weeds",
-		"emoji": "🌿",
+		"emoji": "",
 		"taps_max": 1,
 		"required_tool_tier": 0,
 		"drops": {"coins": 2},
@@ -63,7 +63,7 @@ const OBSTACLES = {
 	"small_wood": {
 		"id": "small_wood",
 		"name": "Fallen Branch",
-		"emoji": "🪵",
+		"emoji": "",
 		"taps_max": 2,
 		"required_tool_tier": 0,
 		"drops": {"wood": 2, "coins": 5},
@@ -72,7 +72,7 @@ const OBSTACLES = {
 	"small_rock": {
 		"id": "small_rock",
 		"name": "Pebble Pile",
-		"emoji": "🪨",
+		"emoji": "",
 		"taps_max": 3,
 		"required_tool_tier": 0,
 		"drops": {"stone": 2, "coins": 5},
@@ -81,7 +81,7 @@ const OBSTACLES = {
 	"hardwood_stump": {
 		"id": "hardwood_stump",
 		"name": "Hardwood Stump",
-		"emoji": "🪵",
+		"emoji": "",
 		"taps_max": 6,
 		"required_tool_tier": 1, # Copper Axe
 		"drops": {"wood": 8, "coins": 20},
@@ -90,7 +90,7 @@ const OBSTACLES = {
 	"granite_boulder": {
 		"id": "granite_boulder",
 		"name": "Granite Boulder",
-		"emoji": "⛰️",
+		"emoji": "",
 		"taps_max": 8,
 		"required_tool_tier": 1, # Copper Pickaxe
 		"drops": {"stone": 8, "coins": 25},
@@ -99,7 +99,7 @@ const OBSTACLES = {
 	"ancient_relic_mound": {
 		"id": "ancient_relic_mound",
 		"name": "Mysterious Mound",
-		"emoji": "🏺",
+		"emoji": "",
 		"taps_max": 10,
 		"required_tool_tier": 2, # Iron Tools
 		"drops": {"stone": 10, "relics": 1, "coins": 100},
