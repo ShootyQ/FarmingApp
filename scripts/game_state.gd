@@ -130,7 +130,8 @@ func _create_obstacle_tile(obs_id: String) -> Dictionary:
 	return {
 		"type": "obstacle",
 		"obstacle_id": obs_id,
-		"taps_left": data["taps_max"]
+		"taps_left": data["taps_max"],
+		"variant": randi() % 4
 	}
 
 # Context-sensitive interaction with a tile
