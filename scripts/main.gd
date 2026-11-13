@@ -401,20 +401,17 @@ func _render_plot(idx: int):
 				var pct = elapsed / total
 				var crop_id = tile.get("crop", "wheat")
 				
-				if crop_id == "wheat":
-					obj_sprite.offset = Vector2(0, -96)
-					badge.position = Vector2(-50, -90)
-					if pct < 0.33:
-						obj_sprite.texture = tex_wheat_sprout
-					elif pct < 0.66:
-						obj_sprite.texture = tex_wheat_growing
-					else:
-						obj_sprite.texture = tex_wheat_heading
+				# All growing stages use authentic 256x256 growth sprites centered in the middle of the diamond
+				obj_sprite.offset = Vector2(0, -96)
+				badge.position = Vector2(-50, -90)
+				
+				if pct < 0.33:
+					obj_sprite.texture = tex_wheat_sprout
+				elif pct < 0.66:
+					obj_sprite.texture = tex_wheat_growing
 				else:
-					obj_sprite.offset = Vector2(0, -32)
-					badge.position = Vector2(-50, -48)
-					if pct < 0.5:
-						obj_sprite.texture = tex_wheat_sprout
+					if crop_id == "wheat":
+						obj_sprite.texture = tex_wheat_heading
 					else:
 						obj_sprite.texture = tex_wheat_growing
 				
@@ -434,30 +431,29 @@ func _render_plot(idx: int):
 						badge.position = Vector2(-50, -112)
 						if is_mut:
 							obj_sprite.texture = tex_wheat_legendary
-							obj_sprite.modulate = Color.WHITE
 							badge.text = "★GOLDEN!★ (+%dc)" % GameData.CROPS[crop_id]["mutated_reward"]
 							badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
 						else:
 							obj_sprite.texture = tex_wheat_mature
-							obj_sprite.modulate = Color.WHITE
 							badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
 							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					"carrot":
-						obj_sprite.offset = Vector2(0, -32)
-						badge.position = Vector2(-50, -48)
+						obj_sprite.offset = Vector2(0, -18)
+						badge.position = Vector2(-50, -60)
 						obj_sprite.texture = tex_carrot
 						obj_sprite.modulate = Color.WHITE
 						badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
 						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					"strawberry":
-						obj_sprite.offset = Vector2(0, -32)
-						badge.position = Vector2(-50, -48)
+						obj_sprite.offset = Vector2(0, -18)
+						badge.position = Vector2(-50, -60)
 						obj_sprite.texture = tex_berry
 						obj_sprite.modulate = Color.WHITE
 						badge.text = "HARVEST! (+%dc)" % GameData.CROPS[crop_id]["reward"]
 						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
 					_:
 						obj_sprite.offset = Vector2(0, -96)
+						badge.position = Vector2(-50, -112)
 						obj_sprite.texture = tex_wheat_mature
 						obj_sprite.modulate = Color.WHITE
 						badge.text = "HARVEST!"
