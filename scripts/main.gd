@@ -309,7 +309,7 @@ func _setup_gardener_dock():
 	# 1. Barn Storage Shortcut Button
 	dock_barn_btn = Button.new()
 	dock_barn_btn.custom_minimum_size = Vector2(150, 56)
-	dock_barn_btn.text = "🎒 Barn (0/10)"
+	dock_barn_btn.text = "Barn (0/10)"
 	dock_barn_btn.add_theme_font_size_override("font_size", 14)
 	dock_barn_btn.add_theme_stylebox_override("normal", normal_wood)
 	dock_barn_btn.add_theme_stylebox_override("hover", hover_wood)
@@ -320,7 +320,7 @@ func _setup_gardener_dock():
 	# 2. Active Seed Pill (Click to open Seed Pouch Drawer)
 	dock_active_seed_btn = Button.new()
 	dock_active_seed_btn.custom_minimum_size = Vector2(240, 56)
-	dock_active_seed_btn.text = "🌱 Seed: Wheat (10c) ▼"
+	dock_active_seed_btn.text = "Seed: Wheat (10c) [v]"
 	dock_active_seed_btn.add_theme_font_size_override("font_size", 14)
 	dock_active_seed_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
 	dock_active_seed_btn.add_theme_stylebox_override("normal", active_gold)
@@ -332,7 +332,7 @@ func _setup_gardener_dock():
 	# 3. Tool Bench Button
 	dock_tool_btn = Button.new()
 	dock_tool_btn.custom_minimum_size = Vector2(190, 56)
-	dock_tool_btn.text = "🪓 Wooden Tools"
+	dock_tool_btn.text = "Wooden Tools"
 	dock_tool_btn.add_theme_font_size_override("font_size", 13)
 	dock_tool_btn.add_theme_stylebox_override("normal", normal_wood)
 	dock_tool_btn.add_theme_stylebox_override("hover", hover_wood)
@@ -343,7 +343,7 @@ func _setup_gardener_dock():
 	# 4. Market / Farm Stand Button
 	dock_market_btn = Button.new()
 	dock_market_btn.custom_minimum_size = Vector2(160, 56)
-	dock_market_btn.text = "🏪 Town Market"
+	dock_market_btn.text = "Town Market"
 	dock_market_btn.add_theme_font_size_override("font_size", 14)
 	var market_sb = make_wood_sb.call(Color(0.14, 0.22, 0.12, 0.94), Color(0.45, 0.75, 0.35, 0.85))
 	var market_hover = make_wood_sb.call(Color(0.18, 0.28, 0.15, 0.98), Color(0.70, 1.0, 0.50, 1.0))
@@ -378,19 +378,19 @@ func _setup_map_buttons():
 
 func _refresh_gardener_dock():
 	if dock_barn_btn:
-		dock_barn_btn.text = "🎒 Barn (%d/10)" % GameState.get_barn_used_slots()
+		dock_barn_btn.text = "Barn (%d/10)" % GameState.get_barn_used_slots()
 		
 	if dock_active_seed_btn:
 		var c = GameData.CROPS.get(GameState.selected_crop, {})
-		dock_active_seed_btn.text = "🌱 Seed: %s (%dc) ▼" % [c.get("name", "Wheat"), c.get("cost", 10)]
+		dock_active_seed_btn.text = "Seed: %s (%dc) [v]" % [c.get("name", "Wheat"), c.get("cost", 10)]
 		
 	if dock_tool_btn:
 		var cur_tool = GameState.get_tool_info()
 		if GameState.tool_tier < GameData.TOOL_TIERS.size() - 1:
 			var next_tool = GameData.TOOL_TIERS[GameState.tool_tier + 1]
-			dock_tool_btn.text = "🪓 %s\nUp: %dc %dw %ds" % [cur_tool["name"], next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
+			dock_tool_btn.text = "%s\nUp: %dc %dw %ds" % [cur_tool["name"], next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
 		else:
-			dock_tool_btn.text = "🪓 %s\n(Max Tier)" % cur_tool["name"]
+			dock_tool_btn.text = "%s\n(Max Tier)" % cur_tool["name"]
 
 func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
@@ -930,7 +930,7 @@ func _build_seed_drawer():
 	seed_drawer.add_child(vbox)
 	
 	var header = Label.new()
-	header.text = "🌱 SEED POUCH • SELECT SEED TO PLANT"
+	header.text = "SEED POUCH • SELECT ACTIVE SEED"
 	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	header.add_theme_font_size_override("font_size", 14)
 	header.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
@@ -1055,7 +1055,7 @@ func _build_market_modal():
 	vbox.add_child(top_h)
 	
 	var title = Label.new()
-	title.text = "🏪 TOWN MARKET & FARM STAND"
+	title.text = "TOWN MARKET & FARM STAND"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
@@ -1112,7 +1112,7 @@ func _build_market_modal():
 	sell_all_btn.name = "SellAllBtn"
 	sell_all_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sell_all_btn.custom_minimum_size = Vector2(0, 44)
-	sell_all_btn.text = "💰 Sell Entire Barn Harvest"
+	sell_all_btn.text = "Sell Entire Barn Harvest"
 	sell_all_btn.add_theme_font_size_override("font_size", 14)
 	
 	var sb_green = StyleBoxFlat.new()
