@@ -44,7 +44,7 @@ var tex_wheat_legendary = preload("res://assets/objects/wheat_legendary.png")
 var tex_carrot = preload("res://assets/objects/carrot_mature.png")
 var tex_berry = preload("res://assets/objects/berry_mature.png")
 
-# Obstacle Variations: Weeds (4), Logs (2+stump), Rocks (3)
+# Obstacle Variations: Weeds (4), Logs (2), Rocks (3)
 var tex_weeds = [
 	preload("res://assets/objects/weed_0.png"), # Thistle
 	preload("res://assets/objects/weed_1.png"), # Tallgrass
@@ -53,8 +53,7 @@ var tex_weeds = [
 ]
 var tex_logs = [
 	preload("res://assets/objects/log_0.png"), # Mossy cedar log
-	preload("res://assets/objects/log_1.png"), # Weathered hardwood log
-	preload("res://assets/objects/stump.png")  # Traditional cut stump
+	preload("res://assets/objects/log_1.png")  # Weathered hardwood log
 ]
 var tex_rocks = [
 	preload("res://assets/objects/rock_0.png"), # Granite field boulder
@@ -350,35 +349,39 @@ func _render_plot(idx: int):
 		"obstacle":
 			soil_sprite.visible = false
 			obj_sprite.visible = true
-			obj_sprite.scale = Vector2(0.55, 0.55)
-			obj_sprite.offset = Vector2(0, -85)
-			badge.position = Vector2(-50, -70)
+			obj_sprite.scale = Vector2(0.38, 0.38)
 			
 			var obs = GameData.OBSTACLES[tile["obstacle_id"]]
 			var seed_hash = abs((idx * 37) ^ (GameState.current_sector_coord.hash() * 19))
 			
 			match tile["obstacle_id"]:
 				"weed":
-					var w_idx = tile.get("variant", seed_hash)
-					obj_sprite.texture = tex_weeds[abs(w_idx) % tex_weeds.size()]
-				"small_wood":
-					# Fallen cedar or hardwood log
-					var l_idx = tile.get("variant", seed_hash)
-					obj_sprite.texture = tex_logs[abs(l_idx) % tex_logs.size()]
-				"hardwood_stump":
-					# Hardwood stump or weathered log
-					var s_idx = tile.get("variant", seed_hash + 1)
-					obj_sprite.texture = tex_logs[abs(s_idx) % tex_logs.size()]
-				"small_rock":
-					# River pebbles or limestone rock cluster
-					var r_idx = tile.get("variant", seed_hash + 1)
-					obj_sprite.texture = tex_rocks[abs(r_idx) % tex_rocks.size()]
-				"granite_boulder":
-					# Rounded granite boulder or rock cluster
-					var b_idx = tile.get("variant", seed_hash)
-					obj_sprite.texture = tex_rocks[abs(b_idx) % tex_rocks.size()]
+					var w_idx = abs(tile.get("variant", seed_hash)) % tex_weeds.size()
+					obj_sprite.texture = tex_weeds[w_idx]
+					obj_sprite.offset = Vector2(0, -84)
+					badge.position = Vector2(-50, -66)
+				"small_wood", "hardwood_stump":
+					var l_idx = abs(tile.get("variant", seed_hash)) % tex_logs.size()
+					obj_sprite.texture = tex_logs[l_idx]
+					if l_idx == 0:
+						obj_sprite.offset = Vector2(-8, -54)
+					else:
+						obj_sprite.offset = Vector2(8, -54)
+					badge.position = Vector2(-50, -48)
+				"small_rock", "granite_boulder":
+					var r_idx = abs(tile.get("variant", seed_hash)) % tex_rocks.size()
+					obj_sprite.texture = tex_rocks[r_idx]
+					if r_idx == 0:
+						obj_sprite.offset = Vector2(-2, -80)
+					elif r_idx == 1:
+						obj_sprite.offset = Vector2(-12, -76)
+					else:
+						obj_sprite.offset = Vector2(0, -82)
+					badge.position = Vector2(-50, -58)
 				_:
 					obj_sprite.texture = tex_weeds[0]
+					obj_sprite.offset = Vector2(0, -84)
+					badge.position = Vector2(-50, -66)
 			
 			badge.text = "%d" % tile["taps_left"]
 			if obs["required_tool_tier"] > GameState.tool_tier:
