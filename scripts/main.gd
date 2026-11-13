@@ -528,16 +528,38 @@ func _update_active_crop_labels():
 				var crop_id = tile.get("crop", "wheat")
 				var pct = elapsed / total
 				var obj_sprite = node.get_node("ObjectSprite") as Sprite2D
-				if crop_id == "wheat":
-					if pct < 0.33:
-						if obj_sprite.texture != tex_wheat_sprout:
-							obj_sprite.texture = tex_wheat_sprout
-					elif pct < 0.66:
-						if obj_sprite.texture != tex_wheat_growing:
-							obj_sprite.texture = tex_wheat_growing
-					else:
-						if obj_sprite.texture != tex_wheat_heading:
-							obj_sprite.texture = tex_wheat_heading
+				match crop_id:
+					"wheat":
+						if pct < 0.33:
+							if obj_sprite.texture != tex_wheat_sprout:
+								obj_sprite.texture = tex_wheat_sprout
+						elif pct < 0.66:
+							if obj_sprite.texture != tex_wheat_growing:
+								obj_sprite.texture = tex_wheat_growing
+						else:
+							if obj_sprite.texture != tex_wheat_heading:
+								obj_sprite.texture = tex_wheat_heading
+					"carrot":
+						if pct < 0.5:
+							if obj_sprite.texture != tex_carrot_sprout:
+								obj_sprite.texture = tex_carrot_sprout
+						else:
+							if obj_sprite.texture != tex_carrot_growing:
+								obj_sprite.texture = tex_carrot_growing
+					"strawberry":
+						if pct < 0.5:
+							if obj_sprite.texture != tex_strawberry_sprout:
+								obj_sprite.texture = tex_strawberry_sprout
+						else:
+							if obj_sprite.texture != tex_strawberry_flowering:
+								obj_sprite.texture = tex_strawberry_flowering
+					"pumpkin":
+						if pct < 0.5:
+							if obj_sprite.texture != tex_pumpkin_sprout:
+								obj_sprite.texture = tex_pumpkin_sprout
+						else:
+							if obj_sprite.texture != tex_pumpkin_vine:
+								obj_sprite.texture = tex_pumpkin_vine
 
 func _refresh_map_grid():
 	var idx = 0
