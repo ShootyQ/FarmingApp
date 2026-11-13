@@ -347,9 +347,12 @@ func _render_plot(idx: int):
 			badge.text = "" # Clean 70s meadow tile
 		
 		"obstacle":
+			var s = (ISO_W / 256.0) * 1.002
 			soil_sprite.visible = false
 			obj_sprite.visible = true
-			obj_sprite.scale = Vector2(0.38, 0.38)
+			obj_sprite.scale = Vector2(s, s)
+			obj_sprite.offset = Vector2(0, -22)
+			badge.position = Vector2(-50, -56)
 			
 			var obs = GameData.OBSTACLES[tile["obstacle_id"]]
 			var seed_hash = abs((idx * 37) ^ (GameState.current_sector_coord.hash() * 19))
@@ -358,30 +361,14 @@ func _render_plot(idx: int):
 				"weed":
 					var w_idx = abs(tile.get("variant", seed_hash)) % tex_weeds.size()
 					obj_sprite.texture = tex_weeds[w_idx]
-					obj_sprite.offset = Vector2(0, -84)
-					badge.position = Vector2(-50, -66)
 				"small_wood", "hardwood_stump":
 					var l_idx = abs(tile.get("variant", seed_hash)) % tex_logs.size()
 					obj_sprite.texture = tex_logs[l_idx]
-					if l_idx == 0:
-						obj_sprite.offset = Vector2(-8, -54)
-					else:
-						obj_sprite.offset = Vector2(8, -54)
-					badge.position = Vector2(-50, -48)
 				"small_rock", "granite_boulder":
 					var r_idx = abs(tile.get("variant", seed_hash)) % tex_rocks.size()
 					obj_sprite.texture = tex_rocks[r_idx]
-					if r_idx == 0:
-						obj_sprite.offset = Vector2(-2, -80)
-					elif r_idx == 1:
-						obj_sprite.offset = Vector2(-12, -76)
-					else:
-						obj_sprite.offset = Vector2(0, -82)
-					badge.position = Vector2(-50, -58)
 				_:
 					obj_sprite.texture = tex_weeds[0]
-					obj_sprite.offset = Vector2(0, -84)
-					badge.position = Vector2(-50, -66)
 			
 			badge.text = "%d" % tile["taps_left"]
 			if obs["required_tool_tier"] > GameState.tool_tier:
