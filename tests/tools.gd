@@ -49,25 +49,25 @@ func _run():
 			check(state.wood == 0, "First wooden/copper hit grants no partial reward")
 			check(state.sector_tiles["1,1"][0]["taps_left"] == 1, "Basic damage is one")
 			state.interact_with_tile("1,1", 0)
-		check(state.sector_tiles["1,1"][0]["type"] == "soil", "Clearing makes soil")
+		check(state.sector_tiles["1,1"][0]["type"] == "grass", "Clearing leaves grass for preparation")
 		check(state.wood == 2 and state.coins == 105, "Clearing grants drops exactly once")
 		var count_after_clear = uses.size()
 		state.seed_inventory["wheat"] = 2
 		state.selected_crop = "wheat"
 		state.interact_with_tile("1,1", 0)
-		check(state.wood == 2 and state.coins == 105 and uses.size() == count_after_clear, "Planting cannot replay tool/drop")
+		check(state.wood == 2 and state.coins == 80 and uses.size() == count_after_clear + 1, "Preparing cleared grass cannot replay obstacle drops")
 		check(count_after_clear - old_count == (2 if tier < 2 else 1), "Tier clearing speed")
-	# Tilling keeps its existing price and has no effect on unaffordable attempts.
+	# Preparation charges once and never starts on unaffordable attempts.
 	state.sector_tiles["1,1"] = [{"type": "grass"}]
 	state.coins = 4
 	var count_before = uses.size()
 	state.interact_with_tile("1,1", 0)
 	check(state.coins == 4 and state.sector_tiles["1,1"][0]["type"] == "grass" and uses.size() == count_before, "Unaffordable tilling")
-	state.coins = 5
+	state.coins = 25
 	state.interact_with_tile("1,1", 0)
-	check(state.coins == 0 and state.sector_tiles["1,1"][0]["type"] == "soil", "Tilling costs five")
+	check(state.coins == 0 and state.sector_tiles["1,1"][0]["type"] == "preparing", "Preparation charges once")
 	check(uses.back()[2] == "hoe" and uses.size() == count_before + 1, "Tilling emits hoe")
-	# Sequential shared purchases use the unchanged prices and never charge on failure.
+	# Sequential shared purchases follow the economy table and never charge on failure.
 	state.tool_tier = 0
 	state.coins = 0
 	state.wood = 0
@@ -107,7 +107,7 @@ func _run():
 	check(farm.tool_menu.visible and farm._farm_modal_open(), "Dock opens blocking tools menu")
 	check(state.coins == coins_before and state.tool_tier == 2, "Opening menu cannot buy upgrade")
 	check(farm.tool_menu.upgrade_button.disabled and "Need" in farm.tool_menu.missing_label.text, "Missing resources shown")
-	state.coins = 3000
+	state.coins = 16000
 	state.wood = 150
 	state.stone = 150
 	state.state_updated.emit()

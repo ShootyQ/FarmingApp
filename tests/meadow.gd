@@ -60,26 +60,31 @@ func run():
 	var position_on_farm = Vector2((coordinate.x - coordinate.y) * 80, -60 + (coordinate.x + coordinate.y) * 40)
 	var screen: Vector2 = farm.plots_root.get_global_transform_with_canvas() * position_on_farm
 	farm._handle_isometric_click(screen)
-	check(state.sector_tiles["1,1"][idx]["type"] == "soil" and state.coins == 95, "Tap outer grass tills for five coins")
+	check(state.sector_tiles["1,1"][idx]["type"] == "preparing" and state.coins == 75, "Tap outer grass starts paid preparation")
 	check(farm.plot_nodes[idx].get_node("Soil").visible, "Tilled outer soil appears immediately")
 	check(farm.tool_effects.active.has(idx), "Outer tile gets hoe animation")
+	state.sector_tiles["1,1"][idx]["prepare_started_at"] -= 301
+	state.update_crop_timers()
 	farm._handle_isometric_click(screen)
 	check(state.sector_tiles["1,1"][idx].get("state") == "growing" and state.seed_inventory["wheat"] == 2, "Outer soil supports planting")
-	state.sector_tiles["1,1"][idx]["plant_time"] = Time.get_unix_time_from_system() - 10
+	state.sector_tiles["1,1"][idx]["plant_time"] = Time.get_unix_time_from_system() - 31
 	state.sector_tiles["1,1"][idx]["is_mutated"] = false
 	state.update_crop_timers()
 	check(state.sector_tiles["1,1"][idx]["state"] == "ready", "Outer crops grow")
 	farm._handle_isometric_click(screen)
 	check(state.sector_tiles["1,1"][idx]["state"] == "empty" and state.barn_inventory[0]["count"] == 1, "Outer crops harvest to barn")
 	# Tilling at both meadow corners, then a save roundtrip.
+	state.coins = 500
+	var expected_coins = 500
 	for corner in [Vector2i(-8, -8), Vector2i(11, 11)]:
 		var corner_idx: int = data.get_farm_index(corner)
+		expected_coins -= state.get_next_plot_cost()
 		state.interact_with_tile("1,1", corner_idx)
-		check(state.sector_tiles["1,1"][corner_idx]["type"] == "soil", "Meadow corner tills")
+		check(state.sector_tiles["1,1"][corner_idx]["type"] == "preparing", "Meadow corner preparation starts")
 	state.save_game()
 	state.load_game()
-	check(state.sector_tiles["1,1"][idx]["state"] == "empty" and state.coins == 85, "Outer farm persists without duplicate charges")
-	check(state.sector_tiles["1,1"][data.get_farm_index(Vector2i(-8,-8))]["type"] == "soil", "Corner soil persists")
+	check(state.sector_tiles["1,1"][idx]["state"] == "empty" and state.coins == expected_coins, "Outer farm persists without duplicate charges")
+	check(state.sector_tiles["1,1"][data.get_farm_index(Vector2i(-8,-8))]["type"] == "preparing", "Corner preparation persists")
 	state._generate_sector_tiles("1,0")
 	check(state.sector_tiles["1,0"].size() == 400, "New sectors also have full playable meadow")
 	print("PASS: saved obstacles, full meadow interaction, old-save migration, outer crop lifecycle and persistence" if failures == 0 else "FAILURES: %d" % failures)

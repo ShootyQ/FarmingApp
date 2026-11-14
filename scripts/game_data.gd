@@ -30,45 +30,45 @@ const CROPS = {
 		"id": "wheat",
 		"name": "Wheat",
 		"emoji": "",
-		"cost": 10,
-		"reward": 25,
-		"grow_time": 5.0, # 5s for testing, easily tuned
+		"cost": 8,
+		"reward": 12,
+		"grow_time": 30,
 		"mutation_chance": 0.05,
 		"mutated_name": "Golden Wheat [Rare]",
-		"mutated_reward": 100
+		"mutated_reward": 24
 	},
 	"carrot": {
 		"id": "carrot",
 		"name": "Carrot",
 		"emoji": "",
-		"cost": 25,
-		"reward": 65,
-		"grow_time": 15.0,
+		"cost": 20,
+		"reward": 34,
+		"grow_time": 90,
 		"mutation_chance": 0.05,
 		"mutated_name": "Crystal Carrot [Rare]",
-		"mutated_reward": 250
+		"mutated_reward": 68
 	},
 	"strawberry": {
 		"id": "strawberry",
 		"name": "Strawberry",
 		"emoji": "",
-		"cost": 60,
-		"reward": 160,
-		"grow_time": 45.0,
-		"mutation_chance": 0.08,
+		"cost": 45,
+		"reward": 78,
+		"grow_time": 180,
+		"mutation_chance": 0.05,
 		"mutated_name": "Jeweled Berry [Rare]",
-		"mutated_reward": 600
+		"mutated_reward": 156
 	},
 	"pumpkin": {
 		"id": "pumpkin",
 		"name": "Pumpkin",
 		"emoji": "",
-		"cost": 150,
-		"reward": 450,
-		"grow_time": 120.0,
-		"mutation_chance": 0.10,
+		"cost": 90,
+		"reward": 150,
+		"grow_time": 300,
+		"mutation_chance": 0.05,
 		"mutated_name": "Haunted Pumpkin [Legendary]",
-		"mutated_reward": 1800
+		"mutated_reward": 300
 	}
 }
 
@@ -134,68 +134,71 @@ const OBSTACLES = {
 const ITEMS = {
 	"wheat": {
 		"name": "Wheat",
-		"sell_value": 25,
 		"icon": "res://assets/icons/icon_wheat.png",
 		"desc": "Crisp golden stalks of farm-fresh wheat."
 	},
 	"golden_wheat": {
 		"name": "Golden Wheat [Rare]",
-		"sell_value": 100,
 		"icon": "res://assets/icons/icon_golden_wheat.png",
 		"desc": "Rare golden-sheaf wheat glowing with sun energy."
 	},
 	"carrot": {
 		"name": "Carrot",
-		"sell_value": 65,
 		"icon": "res://assets/icons/icon_carrot.png",
 		"desc": "Sweet, crunchy heirloom orange carrot."
 	},
 	"crystal_carrot": {
 		"name": "Crystal Carrot [Rare]",
-		"sell_value": 250,
 		"icon": "res://assets/icons/icon_crystal_carrot.png",
 		"desc": "A legendary prismatic crystalline root."
 	},
 	"strawberry": {
 		"name": "Strawberry",
-		"sell_value": 160,
 		"icon": "res://assets/icons/icon_strawberry.png",
 		"desc": "Plump, sun-ripened red garden strawberry."
 	},
 	"jeweled_berry": {
 		"name": "Jeweled Berry [Rare]",
-		"sell_value": 600,
 		"icon": "res://assets/icons/icon_jeweled_berry.png",
 		"desc": "Glittering ruby gemstone strawberry fit for royalty."
 	},
 	"pumpkin": {
 		"name": "Pumpkin",
-		"sell_value": 450,
 		"icon": "res://assets/icons/icon_pumpkin.png",
 		"desc": "A hearty, heavy autumn prize pumpkin."
 	},
 	"haunted_pumpkin": {
 		"name": "Haunted Pumpkin [Legendary]",
-		"sell_value": 1800,
 		"icon": "res://assets/icons/icon_haunted_pumpkin.png",
 		"desc": "Spooky glowing purple pumpkin with mysterious essence."
 	}
 }
 
 func get_item_info(item_id: String) -> Dictionary:
-	return ITEMS.get(item_id, {
-		"name": item_id.capitalize(),
-		"sell_value": 10,
-		"icon": "",
-		"desc": "Farm produce stored safely in the barn."
-	})
+	var info: Dictionary = ITEMS.get(item_id, {"name": item_id.capitalize(), "icon": "", "desc": "Farm produce."}).duplicate()
+	info["sell_value"] = 10
+	for crop_id in CROPS:
+		if item_id == crop_id:
+			info["sell_value"] = CROPS[crop_id]["reward"]
+		elif item_id == RARE_CROP_ITEMS[crop_id]:
+			info["sell_value"] = CROPS[crop_id]["mutated_reward"]
+	return info
+
+const RARE_CROP_ITEMS = {"wheat": "golden_wheat", "carrot": "crystal_carrot", "strawberry": "jeweled_berry", "pumpkin": "haunted_pumpkin"}
+const PREPARATION_SECONDS = 300.0
+const RESOURCE_INTERVAL = 120.0
+const RESOURCE_CAP = 4
+
+func format_time(seconds: float) -> String:
+	var whole = maxi(0, ceili(seconds))
+	return "%d:%02d" % [whole / 60, whole % 60]
 
 # Tools share the saved material tier; selection follows the tapped tile.
 const TOOL_MATERIALS = ["wooden", "copper", "iron", "golden"]
 const TOOLS = {
 	"axe": {"name": "Axe", "purpose": "Clears fallen branches and hardwood stumps.", "requirements": "Wooden: branches. Copper: hardwood stumps."},
 	"pickaxe": {"name": "Pickaxe", "purpose": "Breaks rocks, boulders, and relic mounds.", "requirements": "Wooden: pebbles. Copper: granite. Iron: relic mounds."},
-	"hoe": {"name": "Hoe", "purpose": "Clears weeds and tills grass into planting soil.", "requirements": "Available at every tier. Tilling grass costs 5 coins."}
+	"hoe": {"name": "Hoe", "purpose": "Clears weeds and tills grass into planting soil.", "requirements": "Preparation takes 5:00 once; the soil stays farmable."}
 }
 const OBSTACLE_TOOLS = {
 	"weed": "hoe", "small_wood": "axe", "hardwood_stump": "axe",
@@ -216,6 +219,8 @@ func get_tool_icon_path(tool_id: String, tier: int) -> String:
 const TOOL_TIERS = [
 	{
 		"name": "Wooden Tools",
+		"preparation_slots": 2,
+		"damage": 1,
 		"tier": 0,
 		"cost_coins": 0,
 		"cost_wood": 0,
@@ -224,27 +229,33 @@ const TOOL_TIERS = [
 	},
 	{
 		"name": "Copper Tools",
+		"preparation_slots": 3,
+		"damage": 1,
 		"tier": 1,
-		"cost_coins": 200,
+		"cost_coins": 1000,
 		"cost_wood": 20,
 		"cost_stone": 20,
 		"description": "Can break Hardwood Stumps and Granite Boulders."
 	},
 	{
 		"name": "Iron Tools",
+		"preparation_slots": 4,
+		"damage": 2,
 		"tier": 2,
-		"cost_coins": 800,
+		"cost_coins": 4000,
 		"cost_wood": 60,
 		"cost_stone": 60,
 		"description": "Unlocks mysterious mounds. Deals 2 damage per clearing tap."
 	},
 	{
 		"name": "Golden Tools",
+		"preparation_slots": 5,
+		"damage": 3,
 		"tier": 3,
-		"cost_coins": 3000,
+		"cost_coins": 16000,
 		"cost_wood": 150,
 		"cost_stone": 150,
-		"description": "Deals 2 damage per clearing tap and +50% rare relic chance."
+		"description": "Deals 3 damage per clearing tap and +50% rare relic chance."
 	}
 ]
 
@@ -262,7 +273,7 @@ const SECTORS = {
 	"1,0": {
 		"id": "1,0",
 		"name": "Whispering Forest",
-		"cost": 150,
+		"cost": 1200,
 		"is_start": false,
 		"description": "Rich in hardwood trees and hidden bird nests.",
 		"landmark": "Old Watchtower"
@@ -270,7 +281,7 @@ const SECTORS = {
 	"2,1": {
 		"id": "2,1",
 		"name": "Sunlit Valley",
-		"cost": 300,
+		"cost": 2000,
 		"is_start": false,
 		"description": "Open expanses with wild berries and fertile farming ground.",
 		"landmark": ""
@@ -278,7 +289,7 @@ const SECTORS = {
 	"1,2": {
 		"id": "1,2",
 		"name": "Rocky Quarry",
-		"cost": 500,
+		"cost": 3200,
 		"is_start": false,
 		"description": "Rich stone deposits and ancient geodes waiting to be unearthed.",
 		"landmark": "Cracked Geode Cavern"
@@ -286,7 +297,7 @@ const SECTORS = {
 	"0,1": {
 		"id": "0,1",
 		"name": "Ancient Springs",
-		"cost": 800,
+		"cost": 5000,
 		"is_start": false,
 		"description": "An abandoned natural spring that boosts nearby crop growth.",
 		"landmark": "The Ancient Well"
@@ -294,7 +305,7 @@ const SECTORS = {
 	"0,0": {
 		"id": "0,0",
 		"name": "Lost Orchard",
-		"cost": 1500,
+		"cost": 8000,
 		"is_start": false,
 		"description": "Ancient heirloom trees with rare fruits.",
 		"landmark": "Giant Hollow Tree"
@@ -302,7 +313,7 @@ const SECTORS = {
 	"2,0": {
 		"id": "2,0",
 		"name": "Forgotten Ruins",
-		"cost": 2200,
+		"cost": 12000,
 		"is_start": false,
 		"description": "Ancient stone monuments with buried treasures.",
 		"landmark": "Mystic Shrine"
@@ -310,7 +321,7 @@ const SECTORS = {
 	"0,2": {
 		"id": "0,2",
 		"name": "Canyon River",
-		"cost": 3000,
+		"cost": 18000,
 		"is_start": false,
 		"description": "Lush riverside rich in gold flecks and clay.",
 		"landmark": "Old Watermill"
@@ -318,7 +329,7 @@ const SECTORS = {
 	"2,2": {
 		"id": "2,2",
 		"name": "Archeology Dig",
-		"cost": 5000,
+		"cost": 25000,
 		"is_start": false,
 		"description": "A legendary excavation site bursting with ancient artifacts.",
 		"landmark": "Sunken Vault"

@@ -8,6 +8,7 @@ signal tile_updated(sector_coord: String, tile_idx: int)
 signal message_broadcast(text: String, is_reward: bool)
 signal barn_opened
 signal barn_updated
+signal farm_replaced
 signal tool_used(sector_coord: String, tile_idx: int, tool_id: String)
 
 var coins: int = 150
@@ -21,9 +22,9 @@ var current_sector_coord: String = "1,1"
 
 # Seed Inventory / Seed Pouch (Stock of seeds held by player)
 var seed_inventory: Dictionary = {
-	"wheat": 10,
-	"carrot": 5,
-	"strawberry": 2,
+	"wheat": 8,
+	"carrot": 0,
+	"strawberry": 0,
 	"pumpkin": 0
 }
 
@@ -38,6 +39,8 @@ var unlocked_sectors: Array[String] = ["1,1"]
 # Sector tiles: original 16 plots first, followed by the surrounding meadow.
 var sector_tiles: Dictionary = {}
 
+var resource_last_tick: Dictionary = {}
+const BACKUP_PATH = "user://farm_save_backup.json"
 const SAVE_PATH = "user://farm_save.json"
 
 func _ready():
@@ -108,43 +111,22 @@ func unlock_sector(coord: String) -> bool:
 
 func _generate_sector_tiles(coord: String):
 	var tiles: Array = []
-	var is_homestead = (coord == "1,1")
-	
-	for i in range(16): # 4x4 grid
-		var tile = {}
+	var is_homestead = coord == "1,1"
+	var supply = ["small_wood", "small_wood", "small_wood", "small_wood", "small_rock", "small_rock", "small_rock", "small_rock", "weed", "hardwood_stump", "granite_boulder"]
+	var supply_idx = 0
+	for i in range(16):
+		var tile: Dictionary = {}
 		if is_homestead and i in [5, 6, 9, 10]:
-			# 4 starter farm soil plots in the middle
-			tile = {
-				"type": "soil",
-				"state": "empty",
-				"crop": "",
-				"is_mutated": false,
-				"plant_time": 0.0,
-				"grow_duration": 0.0
-			}
+			tiles_become_soil(tile)
 		elif is_homestead and i == 0:
-			# Red Barn building on the homestead
-			tile = {
-				"type": "barn"
-			}
+			tile = {"type": "barn"}
 		else:
-			# Random obstacle or clear grass based on sector
-			var roll = randf()
-			if roll < 0.25:
-				tile = {"type": "grass"}
-			elif roll < 0.50:
-				tile = _create_obstacle_tile("weed")
-			elif roll < 0.70:
-				tile = _create_obstacle_tile("small_wood")
-			elif roll < 0.85:
-				tile = _create_obstacle_tile("small_rock")
-			elif roll < 0.95:
-				tile = _create_obstacle_tile("hardwood_stump" if randf() < 0.5 else "granite_boulder")
-			else:
-				tile = _create_obstacle_tile("ancient_relic_mound")
+			var kind: String = supply[supply_idx] if supply_idx < supply.size() else ["weed", "hardwood_stump", "granite_boulder", "ancient_relic_mound"].pick_random()
+			tile = _create_obstacle_tile(kind)
+			supply_idx += 1
 		tiles.append(tile)
-	
 	sector_tiles[coord] = tiles
+	resource_last_tick[coord] = Time.get_unix_time_from_system()
 	_ensure_meadow_tiles(coord)
 
 func _ensure_meadow_tiles(coord: String):
@@ -164,6 +146,7 @@ func _create_obstacle_tile(obs_id: String) -> Dictionary:
 
 # Context-sensitive interaction with a tile
 func interact_with_tile(sector_coord: String, tile_idx: int):
+	update_crop_timers()
 	if not is_sector_unlocked(sector_coord):
 		return
 	
@@ -183,6 +166,8 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 			_handle_tap_soil(sector_coord, tile_idx, tile)
 		"grass":
 			used_tool = _handle_tap_grass(sector_coord, tile_idx, tile)
+		"preparing":
+			message_broadcast.emit("Preparing soil: %s remaining" % GameData.format_time(float(tile["prepare_started_at"]) + float(tile["prepare_duration"]) - Time.get_unix_time_from_system()), false)
 		"barn":
 			barn_opened.emit()
 	
@@ -202,8 +187,8 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 		message_broadcast.emit("Requires %s to clear!" % req_tier_name, false)
 		return false
 	
-	# Iron and Golden tools deal two damage per tap.
-	var damage = 2 if tool_tier >= 2 else 1
+	# Clearing strength follows the shared toolkit tier.
+	var damage: int = get_tool_info()["damage"]
 	tile["taps_left"] = max(0, tile["taps_left"] - damage)
 	
 	if tile["taps_left"] > 0:
@@ -225,8 +210,9 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 			relics += 1
 			drop_text += " [Found Rare Relic!]"
 		
-		# Turn tile into tilled soil ready for planting
-		tiles_become_soil(tile)
+		# Clearing grants materials; preparing new land is a separate investment.
+		tile.clear()
+		tile["type"] = "grass"
 		message_broadcast.emit(drop_text, true)
 	return true
 
@@ -239,17 +225,38 @@ func tiles_become_soil(tile: Dictionary):
 	tile["plant_time"] = 0.0
 	tile["grow_duration"] = 0.0
 
-func _handle_tap_grass(sector_coord: String, tile_idx: int, tile: Dictionary) -> bool:
-	# Till grass into farm soil for 5 coins
-	var till_cost = 5
-	if coins >= till_cost:
-		coins -= till_cost
-		tiles_become_soil(tile)
-		message_broadcast.emit("Tilled fertile soil plot! (-5c)", true)
-		return true
-	else:
-		message_broadcast.emit("Need 5 coins to till soil!", false)
+func get_preparation_count() -> int:
+	var count = 0
+	for tiles in sector_tiles.values():
+		for tile in tiles:
+			if tile.get("type") == "preparing":
+				count += 1
+	return count
+
+func get_preparation_limit() -> int:
+	return int(get_tool_info()["preparation_slots"])
+
+func get_next_plot_cost() -> int:
+	var count = 0
+	for tiles in sector_tiles.values():
+		for tile in tiles:
+			if tile.get("type") in ["soil", "preparing"]:
+				count += 1
+	return 25 + 10 * maxi(0, count - 4)
+
+func _handle_tap_grass(_sector_coord: String, _tile_idx: int, tile: Dictionary) -> bool:
+	if get_preparation_count() >= get_preparation_limit():
+		message_broadcast.emit("All %d preparation slots are busy. Wait for a plot to finish." % get_preparation_limit(), false)
 		return false
+	var cost = get_next_plot_cost()
+	if coins < cost:
+		message_broadcast.emit("Need %d coins to prepare this plot." % cost, false)
+		return false
+	coins -= cost
+	tile.clear()
+	tile.merge({"type": "preparing", "prepare_started_at": Time.get_unix_time_from_system(), "prepare_duration": GameData.PREPARATION_SECONDS})
+	message_broadcast.emit("Preparing soil — 5:00 (-%d coins)" % cost, true)
+	return true
 
 func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 	var state = tile["state"]
@@ -308,24 +315,65 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 		var now = Time.get_unix_time_from_system()
 		var elapsed = now - tile["plant_time"]
 		var remaining = max(0.0, tile["grow_duration"] - elapsed)
-		message_broadcast.emit("Crop is growing... (%ds left)" % ceil(remaining), false)
+		message_broadcast.emit("Crop is growing... %s left" % GameData.format_time(remaining), false)
 
-# Update crops growth status across sectors
-func update_crop_timers():
-	var now = Time.get_unix_time_from_system()
+# One-second UI ticks and input both settle jobs against absolute saved timestamps.
+func update_crop_timers(now: float = -1.0):
+	if now < 0:
+		now = Time.get_unix_time_from_system()
+	var changed = false
 	for coord in sector_tiles:
-		var tiles = sector_tiles[coord]
+		var tiles: Array = sector_tiles[coord]
 		for i in range(tiles.size()):
-			var tile = tiles[i]
-			if tile.get("type") == "soil" and tile.get("state") == "growing":
-				var elapsed = now - tile.get("plant_time", now)
-				if elapsed >= tile.get("grow_duration", 0.0):
+			var tile: Dictionary = tiles[i]
+			if tile.get("type") == "preparing" and now >= float(tile["prepare_started_at"]) + float(tile["prepare_duration"]):
+				tiles_become_soil(tile)
+				tile_updated.emit(coord, i)
+				changed = true
+			elif tile.get("type") == "soil" and tile.get("state") == "growing":
+				if now - float(tile["plant_time"]) >= float(tile["grow_duration"]):
 					tile["state"] = "ready"
 					tile_updated.emit(coord, i)
+					changed = true
+		changed = _replenish_resources(coord, now) or changed
+	if changed:
+		save_game()
+		state_updated.emit()
+
+func _replenish_resources(coord: String, now: float) -> bool:
+	if not is_sector_unlocked(coord):
+		return false
+	if not resource_last_tick.has(coord):
+		resource_last_tick[coord] = now
+		return false
+	var ticks = floori((now - float(resource_last_tick[coord])) / GameData.RESOURCE_INTERVAL)
+	if ticks <= 0:
+		return false
+	resource_last_tick[coord] = float(resource_last_tick[coord]) + ticks * GameData.RESOURCE_INTERVAL
+	var tiles: Array = sector_tiles[coord]
+	var available: Array[int] = []
+	var counts = {"small_wood": 0, "small_rock": 0}
+	for i in range(tiles.size()):
+		var tile: Dictionary = tiles[i]
+		if tile.get("type") == "grass":
+			available.append(i)
+		elif tile.get("type") == "obstacle" and counts.has(tile.get("obstacle_id", "")):
+			counts[tile["obstacle_id"]] += 1
+	available.sort_custom(func(a, b): return GameData.farm_coordinates[a].length_squared() < GameData.farm_coordinates[b].length_squared())
+	for kind in counts:
+		var amount = mini(mini(ticks, GameData.RESOURCE_CAP - int(counts[kind])), available.size())
+		for _i in range(maxi(0, amount)):
+			var idx: int = available.pop_front()
+			tiles[idx] = _create_obstacle_tile(kind)
+			tile_updated.emit(coord, idx)
+	# Persist the consumed tick even if the grass is full; never bank extra spawns.
+	return true
 
 # Persistence
-func save_game():
-	var data = {
+func get_save_data() -> Dictionary:
+	return {
+		"economy_version": 2,
+		"resource_last_tick": resource_last_tick,
 		"coins": coins,
 		"wood": wood,
 		"stone": stone,
@@ -338,9 +386,90 @@ func save_game():
 		"seed_inventory": seed_inventory,
 		"save_time": Time.get_unix_time_from_system()
 	}
-	var file = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if file:
-		file.store_string(JSON.stringify(data))
+func _write_save_data(path: String, data: Dictionary) -> bool:
+	var temporary = path + ".tmp"
+	var file = FileAccess.open(temporary, FileAccess.WRITE)
+	if not file:
+		return false
+	file.store_string(JSON.stringify(data))
+	file.flush()
+	var success = file.get_error() == OK
+	file.close()
+	if not success or typeof(JSON.parse_string(FileAccess.get_file_as_string(temporary))) != TYPE_DICTIONARY:
+		return false
+	return DirAccess.rename_absolute(temporary, path) == OK
+
+func save_game() -> bool:
+	return _write_save_data(SAVE_PATH, get_save_data())
+
+func has_farm_backup() -> bool:
+	return FileAccess.file_exists(BACKUP_PATH)
+
+func start_new_farm() -> bool:
+	update_crop_timers()
+	var previous: Dictionary = get_save_data().duplicate(true)
+	if not _write_save_data(BACKUP_PATH, previous):
+		message_broadcast.emit("Could not back up your farm. Nothing was reset.", false)
+		return false
+	coins = 150
+	wood = 10
+	stone = 5
+	relics = 0
+	tool_tier = 0
+	selected_crop = "wheat"
+	current_sector_coord = "1,1"
+	unlocked_sectors.assign(["1,1"])
+	sector_tiles = {}
+	resource_last_tick = {}
+	barn_inventory = []
+	seed_inventory = {"wheat": 8, "carrot": 0, "strawberry": 0, "pumpkin": 0}
+	_generate_sector_tiles("1,1")
+	if not save_game():
+		_apply_save_data(previous)
+		message_broadcast.emit("Could not save the new farm. Your original farm is still active.", false)
+		return false
+	farm_replaced.emit()
+	state_updated.emit()
+	barn_updated.emit()
+	message_broadcast.emit("New farm ready! Your previous farm is backed up on this device.", true)
+	return true
+
+func _valid_backup(data: Variant) -> bool:
+	if typeof(data) != TYPE_DICTIONARY:
+		return false
+	for key in ["coins", "wood", "stone", "relics", "tool_tier"]:
+		if typeof(data.get(key)) not in [TYPE_INT, TYPE_FLOAT] or float(data[key]) < 0:
+			return false
+	if int(data["tool_tier"]) >= GameData.TOOL_TIERS.size():
+		return false
+	if typeof(data.get("sector_tiles")) != TYPE_DICTIONARY or typeof(data.get("seed_inventory")) != TYPE_DICTIONARY or typeof(data.get("barn_inventory")) != TYPE_ARRAY or typeof(data.get("unlocked_sectors")) != TYPE_ARRAY:
+		return false
+	if not data["sector_tiles"].has("1,1"):
+		return false
+	for tiles in data["sector_tiles"].values():
+		if typeof(tiles) != TYPE_ARRAY or tiles.size() < 16:
+			return false
+		for tile in tiles:
+			if typeof(tile) != TYPE_DICTIONARY or tile.get("type", "") not in ["soil", "grass", "obstacle", "barn", "preparing"]:
+				return false
+	return true
+
+func restore_previous_farm() -> bool:
+	var parser = JSON.new()
+	var parsed_ok = parser.parse(FileAccess.get_file_as_string(BACKUP_PATH)) == OK
+	var data = parser.data if parsed_ok else null
+	if not _valid_backup(data):
+		message_broadcast.emit("The previous farm backup could not be read. Nothing changed.", false)
+		return false
+	if not _write_save_data(SAVE_PATH, data):
+		message_broadcast.emit("Could not restore the backup. Your current farm is unchanged.", false)
+		return false
+	load_game()
+	farm_replaced.emit()
+	state_updated.emit()
+	barn_updated.emit()
+	message_broadcast.emit("Previous farm restored.", true)
+	return true
 
 func load_game():
 	if not FileAccess.file_exists(SAVE_PATH):
@@ -359,6 +488,10 @@ func load_game():
 		_generate_sector_tiles("1,1")
 		return
 	
+	_apply_save_data(parsed)
+
+func _apply_save_data(parsed: Dictionary):
+	resource_last_tick = parsed.get("resource_last_tick", {}).duplicate(true)
 	coins = parsed.get("coins", 150)
 	wood = parsed.get("wood", 10)
 	stone = parsed.get("stone", 5)
@@ -377,6 +510,8 @@ func load_game():
 	
 	for coord in sector_tiles:
 		_ensure_meadow_tiles(coord)
+		if not resource_last_tick.has(coord):
+			resource_last_tick[coord] = Time.get_unix_time_from_system()
 
 	# Load barn storage
 	barn_inventory = parsed.get("barn_inventory", [])
@@ -404,7 +539,7 @@ func get_seed_count(crop_id: String) -> int:
 	return int(seed_inventory.get(crop_id, 0))
 
 func buy_seeds(crop_id: String, amount: int = 1) -> bool:
-	if not crop_id in GameData.CROPS:
+	if amount <= 0 or not crop_id in GameData.CROPS:
 		return false
 	var c = GameData.CROPS[crop_id]
 	var unit_cost = c.get("cost", 10)

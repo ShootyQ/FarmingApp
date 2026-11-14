@@ -31,6 +31,12 @@ func _run():
 		if farm.tool_menu.visible:
 			_assert_fits(farm.tool_menu.upgrade_button, width)
 			assert(farm.tool_menu.upgrade_button.get_global_rect().end.y <= farm.get_viewport_rect().size.y, "Upgrade footer stays visible")
+			farm.tool_menu._show_confirmation(false)
+			await process_frame
+			await process_frame
+			_assert_fits(farm.tool_menu.confirmation_action, width)
+			assert(farm.tool_menu.confirmation_action.get_global_rect().end.y <= farm.get_viewport_rect().size.y, "Restart confirmation fits screen")
+			farm.tool_menu.confirmation.visible = false
 		farm.seed_modal.visible = false
 		farm.market_modal.visible = false
 		farm.barn_modal.visible = false

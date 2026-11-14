@@ -149,6 +149,7 @@ var tool_effects: Node2D
 var effect_sector: String = ""
 var rendered_sector: String = ""
 var rendered_tool_tier: int = -1
+var timer_elapsed: float = 0.0
 var mobile_ui: bool = false
 var zoom_reset_btn: Button
 
@@ -180,6 +181,7 @@ func _ready():
 	tool_effects.z_index = 100
 	world_container.add_child(tool_effects)
 	GameState.tool_used.connect(_on_tool_used)
+	GameState.farm_replaced.connect(_on_farm_replaced)
 	
 	GameState.state_updated.connect(_refresh_ui)
 	GameState.tile_updated.connect(_on_tile_updated)
@@ -301,9 +303,24 @@ func _setup_mobile_hud():
 	barn_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	frame.queue_free()
 
-func _process(_delta: float):
+func _process(delta: float):
+	timer_elapsed += delta
+	if timer_elapsed < 1.0:
+		return
+	timer_elapsed = 0.0
 	GameState.update_crop_timers()
 	_update_active_crop_labels()
+	if tool_menu and tool_menu.visible:
+		tool_menu.refresh_preparation()
+
+func _on_farm_replaced():
+	_close_farm_menus()
+	tool_effects.clear()
+	rendered_sector = ""
+	rendered_tool_tier = -1
+	camera.position = Vector2.ZERO
+	camera.reset_smoothing()
+	_refresh_ui()
 
 func _farm_modal_open() -> bool:
 	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible)
@@ -801,7 +818,7 @@ func _refresh_gardener_dock():
 		
 	if dock_tool_title and dock_tool_sub:
 		dock_tool_title.text = "Farm Tools"
-		dock_tool_sub.text = "%s • Upgrade" % GameData.TOOL_MATERIALS[GameState.tool_tier].capitalize()
+		dock_tool_sub.text = "%s • %d/%d busy" % [GameData.TOOL_MATERIALS[GameState.tool_tier].capitalize(), GameState.get_preparation_count(), GameState.get_preparation_limit()]
 
 func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
@@ -827,10 +844,12 @@ func _on_tool_used(coord: String, tile_idx: int, tool_id: String):
 	var tile: Dictionary = GameState.sector_tiles[coord][tile_idx]
 	var feedback = "Tilled!" if tool_id == "hoe" else "Cleared!"
 	if tile.get("type") == "obstacle":
-		var damage = 2 if GameState.tool_tier >= 2 else 1
+		var damage: int = GameState.get_tool_info()["damage"]
 		feedback = "%d hits left" % ceili(float(tile["taps_left"]) / damage)
-	elif tool_id == "hoe":
-		feedback = "Soil ready!"
+	elif tile.get("type") == "preparing":
+		feedback = "Preparing 5:00"
+	else:
+		feedback = "Cleared!"
 	tool_effects.play(tile_idx, plots_root.position + plot_nodes[tile_idx].position, tool_id, GameState.tool_tier, feedback)
 
 func _on_map_sector_clicked(coord: String):
@@ -898,6 +917,7 @@ func _render_plot(idx: int):
 	var soil_sprite = node.get_node("Soil") as Sprite2D
 	var obj_sprite = node.get_node("ObjectSprite") as Sprite2D
 	var badge = node.get_node("Badge") as Label
+	soil_sprite.modulate = Color.WHITE
 	
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
 	if idx >= tiles.size():
@@ -950,7 +970,7 @@ func _render_plot(idx: int):
 				_:
 					obj_sprite.texture = tex_weeds[0]
 			
-			badge.text = "%d hits" % ceili(float(tile["taps_left"]) / (2 if GameState.tool_tier >= 2 else 1))
+			badge.text = "%d hits" % ceili(float(tile["taps_left"]) / int(GameState.get_tool_info()["damage"]))
 			if obs["required_tool_tier"] > GameState.tool_tier:
 				badge.modulate = Color(1.0, 0.45, 0.45, 1.0)
 				obj_sprite.modulate = Color(1.0, 0.6, 0.6)
@@ -958,6 +978,13 @@ func _render_plot(idx: int):
 				badge.modulate = Color(1.0, 0.95, 0.75, 1.0)
 				obj_sprite.modulate = Color.WHITE
 		
+		"preparing":
+			soil_sprite.visible = true
+			soil_sprite.modulate = Color(0.55, 0.72, 0.9, 0.85)
+			obj_sprite.visible = false
+			badge.position = Vector2(-65, -34)
+			badge.text = "Preparing %s" % GameData.format_time(float(tile["prepare_started_at"]) + float(tile["prepare_duration"]) - Time.get_unix_time_from_system())
+			badge.modulate = Color("bce4ff")
 		"soil":
 			soil_sprite.visible = true
 			var state = tile.get("state", "empty")
@@ -1007,7 +1034,7 @@ func _render_plot(idx: int):
 				
 				obj_sprite.modulate = Color.WHITE
 				var remain = max(0.0, total - elapsed)
-				badge.text = "%ds" % ceil(remain)
+				badge.text = GameData.format_time(remain)
 				badge.modulate = Color(0.9, 1.0, 0.7, 1.0)
 			
 			elif state == "ready":
@@ -1069,7 +1096,9 @@ func _update_active_crop_labels():
 	var now = Time.get_unix_time_from_system()
 	for i in range(tiles.size()):
 		var tile = tiles[i]
-		if tile.get("type") == "soil" and tile.get("state") == "growing":
+		if tile.get("type") == "preparing":
+			_render_plot(i)
+		elif tile.get("type") == "soil" and tile.get("state") == "growing":
 			var elapsed = now - tile.get("plant_time", now)
 			var total = max(1.0, tile.get("grow_duration", 1.0))
 			var remain = max(0.0, total - elapsed)
@@ -1079,7 +1108,7 @@ func _update_active_crop_labels():
 			else:
 				var node = plot_nodes[i]
 				var badge = node.get_node("Badge") as Label
-				badge.text = "%ds" % ceil(remain)
+				badge.text = GameData.format_time(remain)
 				
 				# Update visual growth phase in real time
 				var crop_id = tile.get("crop", "wheat")
@@ -1522,7 +1551,8 @@ func _refresh_seed_modal():
 			title_h.add_child(eq_tag)
 			
 		var stats_lbl = Label.new()
-		stats_lbl.text = "Grow: %ds • Harvest: +%dc • Unit Cost: %dc" % [int(c["grow_time"]), c["reward"], c["cost"]]
+		stats_lbl.text = "Grow %s • Seed %dc • Sell %dc • Profit %dc" % [GameData.format_time(c["grow_time"]), c["cost"], c["reward"], c["reward"] - c["cost"]]
+		stats_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		stats_lbl.add_theme_font_size_override("font_size", 15 if mobile_ui else 12)
 		stats_lbl.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.9))
 		info_v.add_child(stats_lbl)
