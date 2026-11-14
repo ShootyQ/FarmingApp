@@ -1,5 +1,28 @@
 extends Node
 
+# Keep the original 4x4 indices first so existing crops and buildings stay put.
+const MEADOW_MIN = -8
+const MEADOW_MAX = 11
+const MEADOW_TILE_COUNT = 400
+var farm_coordinates: Array[Vector2i] = []
+var farm_indices: Dictionary = {}
+
+func _init():
+	for y in range(4):
+		for x in range(4):
+			_add_farm_coordinate(Vector2i(x, y))
+	for y in range(MEADOW_MIN, MEADOW_MAX + 1):
+		for x in range(MEADOW_MIN, MEADOW_MAX + 1):
+			if x < 0 or x >= 4 or y < 0 or y >= 4:
+				_add_farm_coordinate(Vector2i(x, y))
+
+func _add_farm_coordinate(coordinate: Vector2i):
+	farm_indices[coordinate] = farm_coordinates.size()
+	farm_coordinates.append(coordinate)
+
+func get_farm_index(coordinate: Vector2i) -> int:
+	return farm_indices.get(coordinate, -1)
+
 # Crop Database
 # Fast snack crops to long-haul crops
 const CROPS = {

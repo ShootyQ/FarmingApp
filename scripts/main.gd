@@ -147,6 +147,8 @@ var touch_was_multitouch: bool = false
 var tool_menu: Control
 var tool_effects: Node2D
 var effect_sector: String = ""
+var rendered_sector: String = ""
+var rendered_tool_tier: int = -1
 var mobile_ui: bool = false
 var zoom_reset_btn: Button
 
@@ -436,8 +438,8 @@ func _handle_isometric_click(screen_position: Vector2):
 	var gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
 	var gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
 	
-	if gx >= 0 and gx < 4 and gy >= 0 and gy < 4:
-		var idx = gy * 4 + gx
+	var idx = GameData.get_farm_index(Vector2i(gx, gy))
+	if idx >= 0:
 		_on_plot_clicked(idx)
 
 func _build_isometric_grid():
@@ -461,8 +463,8 @@ func _build_isometric_grid():
 	var s = (ISO_W / 256.0) * 1.002 # Tight seamless 2:1 fit
 	
 	# 1. Build continuous 20x20 meadow landscape
-	var meadow_min = -8
-	var meadow_max = 11
+	var meadow_min = GameData.MEADOW_MIN
+	var meadow_max = GameData.MEADOW_MAX
 	
 	for my in range(meadow_min, meadow_max + 1):
 		for mx in range(meadow_min, meadow_max + 1):
@@ -497,10 +499,11 @@ func _build_isometric_grid():
 			spr.texture = tex_grass[g_idx]
 			meadow_container.add_child(spr)
 	
-	# 2. Build the 16 interactive farm plots (4x4)
-	for i in range(16):
-		var gx = i % 4
-		var gy = i / 4
+	# 2. Every meadow diamond is playable; original tile indices stay stable.
+	for i in range(GameData.farm_coordinates.size()):
+		var coordinate: Vector2i = GameData.farm_coordinates[i]
+		var gx = coordinate.x
+		var gy = coordinate.y
 		
 		# 2:1 Isometric formula matching the meadow
 		var iso_x = origin_x + (gx - gy) * (ISO_W * 0.5)
@@ -509,7 +512,7 @@ func _build_isometric_grid():
 		var node = Node2D.new()
 		node.name = "Plot_%d" % i
 		node.position = Vector2(iso_x, iso_y)
-		node.z_index = gx + gy # Natural isometric Y-sorting
+		node.z_index = gx + gy - 2 * GameData.MEADOW_MIN # Keep every plot above meadow ground
 		
 		# Layer 1: Flat Furrowed Soil Diamond (Plowed FarmVille rows)
 		var soil_sprite = Sprite2D.new()
@@ -878,8 +881,13 @@ func _refresh_ui():
 	if market_modal and market_modal.visible:
 		_refresh_market_modal()
 	
-	for i in range(16):
-		_render_plot(i)
+	# Tile signals refresh individual changes. Rerender the meadow only when its
+	# sector or tool requirements change, not all 400 tiles after every tap.
+	if rendered_sector != GameState.current_sector_coord or rendered_tool_tier != GameState.tool_tier:
+		for i in range(plot_nodes.size()):
+			_render_plot(i)
+		rendered_sector = GameState.current_sector_coord
+		rendered_tool_tier = GameState.tool_tier
 	
 	_refresh_map_grid()
 
@@ -931,13 +939,13 @@ func _render_plot(idx: int):
 			
 			match tile["obstacle_id"]:
 				"weed":
-					var w_idx = abs(tile.get("variant", seed_hash)) % tex_weeds.size()
+					var w_idx = abs(int(tile.get("variant", seed_hash))) % tex_weeds.size()
 					obj_sprite.texture = tex_weeds[w_idx]
 				"small_wood", "hardwood_stump":
-					var l_idx = abs(tile.get("variant", seed_hash)) % tex_logs.size()
+					var l_idx = abs(int(tile.get("variant", seed_hash))) % tex_logs.size()
 					obj_sprite.texture = tex_logs[l_idx]
 				"small_rock", "granite_boulder":
-					var r_idx = abs(tile.get("variant", seed_hash)) % tex_rocks.size()
+					var r_idx = abs(int(tile.get("variant", seed_hash))) % tex_rocks.size()
 					obj_sprite.texture = tex_rocks[r_idx]
 				_:
 					obj_sprite.texture = tex_weeds[0]

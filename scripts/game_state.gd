@@ -35,7 +35,7 @@ var barn_inventory: Array = []
 # Unlocked sectors list
 var unlocked_sectors: Array[String] = ["1,1"]
 
-# Sector tiles data: { "1,1": [ {tile_dict}, ... 16 tiles ] }
+# Sector tiles: original 16 plots first, followed by the surrounding meadow.
 var sector_tiles: Dictionary = {}
 
 const SAVE_PATH = "user://farm_save.json"
@@ -145,6 +145,13 @@ func _generate_sector_tiles(coord: String):
 		tiles.append(tile)
 	
 	sector_tiles[coord] = tiles
+	_ensure_meadow_tiles(coord)
+
+func _ensure_meadow_tiles(coord: String):
+	# Expansion adds clear grass without replacing any saved tile.
+	var tiles: Array = sector_tiles[coord]
+	while tiles.size() < GameData.MEADOW_TILE_COUNT:
+		tiles.append({"type": "grass"})
 
 func _create_obstacle_tile(obs_id: String) -> Dictionary:
 	var data = GameData.OBSTACLES[obs_id]
@@ -368,6 +375,9 @@ func load_game():
 	if not "1,1" in sector_tiles:
 		_generate_sector_tiles("1,1")
 	
+	for coord in sector_tiles:
+		_ensure_meadow_tiles(coord)
+
 	# Load barn storage
 	barn_inventory = parsed.get("barn_inventory", [])
 	
