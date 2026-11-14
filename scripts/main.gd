@@ -10,10 +10,11 @@ const ISO_H = 80.0
 @onready var plots_root = $WorldViewport/World/Plots
 @onready var camera = $WorldViewport/World/Camera2D
 
-@onready var coins_label = $HUD/Margin/VBox/TopBar/Resources/Coins
-@onready var wood_label = $HUD/Margin/VBox/TopBar/Resources/Wood
-@onready var stone_label = $HUD/Margin/VBox/TopBar/Resources/Stone
-@onready var relics_label = $HUD/Margin/VBox/TopBar/Resources/Relics
+@onready var resources_container = $HUD/Margin/VBox/TopBar/Resources
+var coins_label: Label
+var wood_label: Label
+var stone_label: Label
+var relics_label: Label
 @onready var sector_title = $HUD/Margin/VBox/TopBar/SectorInfo/SectorTitle
 @onready var status_banner = $HUD/Margin/VBox/StatusBanner
 
@@ -47,6 +48,12 @@ var tex_dock_barn = preload("res://assets/ui/dock_icon_barn.png")
 var tex_dock_seed = preload("res://assets/ui/dock_icon_seed.png")
 var tex_dock_tools = preload("res://assets/ui/dock_icon_tools.png")
 var tex_dock_market = preload("res://assets/ui/dock_icon_market.png")
+
+# Top HUD Resource Icons
+var tex_res_coin = preload("res://assets/ui/res_icon_coin.png")
+var tex_res_wood = preload("res://assets/ui/res_icon_wood.png")
+var tex_res_stone = preload("res://assets/ui/res_icon_stone.png")
+var tex_res_relic = preload("res://assets/ui/res_icon_relic.png")
 
 # Seed Pouch Modal & Market Modal
 var seed_modal: Control
@@ -134,6 +141,7 @@ var total_drag_dist: float = 0.0
 func _ready():
 	_build_isometric_grid()
 	_setup_gardener_dock()
+	_setup_resource_bar()
 	_build_seed_modal()
 	_build_market_modal()
 	_build_barn_modal()
@@ -146,11 +154,26 @@ func _ready():
 	GameState.barn_updated.connect(_refresh_barn_modal)
 	GameState.barn_updated.connect(_refresh_market_modal)
 	
-	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.pressed.connect(func(): map_modal.visible = true)
+	var make_wood_small_sb = func() -> StyleBoxFlat:
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.20, 0.14, 0.09, 0.90)
+		sb.set_border_width_all(2)
+		sb.border_color = Color(0.65, 0.50, 0.30, 0.85)
+		sb.set_corner_radius_all(8)
+		sb.content_margin_left = 10
+		sb.content_margin_right = 10
+		sb.content_margin_top = 4
+		sb.content_margin_bottom = 4
+		return sb
+		
+	var map_btn = $HUD/Margin/VBox/TopBar/SectorInfo/MapBtn
+	map_btn.add_theme_stylebox_override("normal", make_wood_small_sb.call())
+	map_btn.pressed.connect(func(): map_modal.visible = true)
 	$HUD/MapModal/Panel/VBox/CloseMapBtn.pressed.connect(func(): map_modal.visible = false)
 	
 	barn_btn = Button.new()
 	barn_btn.text = "Barn (0/10)"
+	barn_btn.add_theme_stylebox_override("normal", make_wood_small_sb.call())
 	barn_btn.pressed.connect(_open_barn_modal)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(barn_btn)
 	
@@ -304,6 +327,72 @@ func _build_isometric_grid():
 		
 		plots_root.add_child(node)
 		plot_nodes.append(node)
+
+func _format_number(val: int) -> String:
+	var s = str(val)
+	var res = ""
+	var count = 0
+	for i in range(s.length() - 1, -1, -1):
+		res = s[i] + res
+		count += 1
+		if count % 3 == 0 and i > 0 and s[i - 1] != "-":
+			res = "," + res
+	return res
+
+func _setup_resource_bar():
+	for child in resources_container.get_children():
+		child.queue_free()
+		
+	resources_container.alignment = BoxContainer.ALIGNMENT_END
+	resources_container.add_theme_constant_override("separation", 10)
+	
+	var create_res_badge = func(icon_tex: Texture2D, border_col: Color, text_col: Color) -> Label:
+		var pill = PanelContainer.new()
+		pill.custom_minimum_size = Vector2(0, 36)
+		
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.18, 0.12, 0.08, 0.92)
+		sb.set_border_width_all(2)
+		sb.border_color = border_col
+		sb.set_corner_radius_all(10)
+		sb.content_margin_left = 8
+		sb.content_margin_right = 12
+		sb.content_margin_top = 4
+		sb.content_margin_bottom = 4
+		pill.add_theme_stylebox_override("panel", sb)
+		
+		var h = HBoxContainer.new()
+		h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		h.alignment = BoxContainer.ALIGNMENT_CENTER
+		h.add_theme_constant_override("separation", 8)
+		pill.add_child(h)
+		
+		var ic = TextureRect.new()
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ic.custom_minimum_size = Vector2(24, 24)
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		ic.texture = icon_tex
+		h.add_child(ic)
+		
+		var val_lbl = Label.new()
+		val_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		val_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		val_lbl.add_theme_font_size_override("font_size", 14)
+		val_lbl.add_theme_color_override("font_color", text_col)
+		val_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
+		val_lbl.add_theme_constant_override("shadow_offset_x", 1)
+		val_lbl.add_theme_constant_override("shadow_offset_y", 1)
+		h.add_child(val_lbl)
+		
+		resources_container.add_child(pill)
+		return val_lbl
+
+	coins_label = create_res_badge.call(tex_res_coin, Color(0.95, 0.80, 0.30, 0.9), Color(1.0, 0.92, 0.65, 1.0))
+	wood_label = create_res_badge.call(tex_res_wood, Color(0.70, 0.50, 0.28, 0.85), Color(0.96, 0.90, 0.82, 1.0))
+	stone_label = create_res_badge.call(tex_res_stone, Color(0.65, 0.62, 0.55, 0.85), Color(0.90, 0.90, 0.88, 1.0))
+	relics_label = create_res_badge.call(tex_res_relic, Color(0.75, 0.55, 0.95, 0.9), Color(0.92, 0.85, 1.0, 1.0))
 
 func _setup_gardener_dock():
 	for child in bottom_controls.get_children():
@@ -533,10 +622,14 @@ func _on_map_sector_clicked(coord: String):
 			_show_message("Must unlock an adjacent plot first!", false)
 
 func _refresh_ui():
-	coins_label.text = "Coins: %d" % GameState.coins
-	wood_label.text = "Wood: %d" % GameState.wood
-	stone_label.text = "Stone: %d" % GameState.stone
-	relics_label.text = "Relics: %d" % GameState.relics
+	if coins_label:
+		coins_label.text = _format_number(GameState.coins)
+	if wood_label:
+		wood_label.text = _format_number(GameState.wood)
+	if stone_label:
+		stone_label.text = _format_number(GameState.stone)
+	if relics_label:
+		relics_label.text = _format_number(GameState.relics)
 	
 	var s_info = GameData.SECTORS.get(GameState.current_sector_coord, {})
 	sector_title.text = "%s (%s)" % [s_info.get("name", "Farm"), GameState.current_sector_coord]
