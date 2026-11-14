@@ -819,13 +819,12 @@ func _show_message(text: String, is_reward: bool):
 func _build_barn_modal():
 	barn_modal = Control.new()
 	barn_modal.name = "BarnModal"
-	barn_modal.anchors_preset = Control.PRESET_FULL_RECT
 	barn_modal.visible = false
 	$HUD.add_child(barn_modal)
+	barn_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
 	# Dimmed dark overlay
 	var overlay = ColorRect.new()
-	overlay.anchors_preset = Control.PRESET_FULL_RECT
 	overlay.color = Color(0, 0, 0, 0.70)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay.gui_input.connect(func(event):
@@ -833,21 +832,26 @@ func _build_barn_modal():
 			barn_modal.visible = false
 	)
 	barn_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
-	# Center container for barn interior frame
-	var center = CenterContainer.new()
-	center.anchors_preset = Control.PRESET_FULL_RECT
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	barn_modal.add_child(center)
-	
-	# Barn Interior Card / TextureRect
+	# Barn Interior Card / TextureRect (Explicitly centered in viewport)
 	var frame = TextureRect.new()
 	frame.texture = tex_barn_interior
 	frame.custom_minimum_size = Vector2(860, 640)
+	frame.anchor_left = 0.5
+	frame.anchor_right = 0.5
+	frame.anchor_top = 0.5
+	frame.anchor_bottom = 0.5
+	frame.offset_left = -430.0
+	frame.offset_right = 430.0
+	frame.offset_top = -320.0
+	frame.offset_bottom = 320.0
+	frame.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	frame.grow_vertical = Control.GROW_DIRECTION_BOTH
 	frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	frame.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	frame.mouse_filter = Control.MOUSE_FILTER_STOP
-	center.add_child(frame)
+	barn_modal.add_child(frame)
 	
 	# Close button (top right)
 	var close_btn = Button.new()
@@ -1019,13 +1023,12 @@ func _on_barn_slot_clicked(slot_idx: int):
 func _build_seed_modal():
 	seed_modal = Control.new()
 	seed_modal.name = "SeedModal"
-	seed_modal.anchors_preset = Control.PRESET_FULL_RECT
 	seed_modal.visible = false
 	$HUD.add_child(seed_modal)
+	seed_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
 	# Dimmed dark overlay
 	var overlay = ColorRect.new()
-	overlay.anchors_preset = Control.PRESET_FULL_RECT
 	overlay.color = Color(0, 0, 0, 0.72)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay.gui_input.connect(func(event):
@@ -1033,15 +1036,21 @@ func _build_seed_modal():
 			seed_modal.visible = false
 	)
 	seed_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
-	var center = CenterContainer.new()
-	center.anchors_preset = Control.PRESET_FULL_RECT
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	seed_modal.add_child(center)
-	
-	# Seed Merchant Card Panel
+	# Seed Merchant Card Panel (Explicitly centered in viewport)
 	var panel = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(760, 520)
+	panel.custom_minimum_size = Vector2(760, 500)
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -380.0
+	panel.offset_right = 380.0
+	panel.offset_top = -250.0
+	panel.offset_bottom = 250.0
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	var psb = StyleBoxFlat.new()
 	psb.bg_color = Color(0.18, 0.12, 0.08, 0.98)
 	psb.set_border_width_all(3)
@@ -1052,7 +1061,7 @@ func _build_seed_modal():
 	psb.content_margin_top = 18
 	psb.content_margin_bottom = 18
 	panel.add_theme_stylebox_override("panel", psb)
-	center.add_child(panel)
+	seed_modal.add_child(panel)
 	
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
@@ -1244,13 +1253,12 @@ func _refresh_seed_modal():
 func _build_market_modal():
 	market_modal = Control.new()
 	market_modal.name = "MarketModal"
-	market_modal.anchors_preset = Control.PRESET_FULL_RECT
 	market_modal.visible = false
 	$HUD.add_child(market_modal)
+	market_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
 	# Dimmed overlay
 	var overlay = ColorRect.new()
-	overlay.anchors_preset = Control.PRESET_FULL_RECT
 	overlay.color = Color(0, 0, 0, 0.72)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay.gui_input.connect(func(event):
@@ -1258,15 +1266,21 @@ func _build_market_modal():
 			market_modal.visible = false
 	)
 	market_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
-	var center = CenterContainer.new()
-	center.anchors_preset = Control.PRESET_FULL_RECT
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	market_modal.add_child(center)
-	
-	# Market Stall Panel
+	# Market Stall Panel (Explicitly centered in viewport)
 	var panel = PanelContainer.new()
 	panel.custom_minimum_size = Vector2(740, 500)
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -370.0
+	panel.offset_right = 370.0
+	panel.offset_top = -250.0
+	panel.offset_bottom = 250.0
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	var psb = StyleBoxFlat.new()
 	psb.bg_color = Color(0.18, 0.12, 0.08, 0.98)
 	psb.set_border_width_all(3)
@@ -1277,7 +1291,7 @@ func _build_market_modal():
 	psb.content_margin_top = 18
 	psb.content_margin_bottom = 18
 	panel.add_theme_stylebox_override("panel", psb)
-	center.add_child(panel)
+	market_modal.add_child(panel)
 	
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
