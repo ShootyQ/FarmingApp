@@ -40,7 +40,10 @@ jobs:
             cp -r build/web/Web/* build/web/
             rm -rf build/web/Web
           fi
-          python3 tools/prepare_web.py build/web "${{ github.sha }}"
+          mkdir -p /tmp/farming-previous-web
+          git fetch --depth=1 origin gh-pages
+          git archive FETCH_HEAD | tar -x -C /tmp/farming-previous-web
+          python3 tools/prepare_web.py build/web "${{ github.sha }}" /tmp/farming-previous-web
 
       # Option A: Deploy directly to gh-pages branch (classic GitHub Pages)
       - name: Deploy to gh-pages branch
