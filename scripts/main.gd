@@ -5,6 +5,9 @@ extends Control
 
 const ISO_W = 160.0
 const ISO_H = 80.0
+const MIN_ZOOM = 0.6
+const MAX_ZOOM = 3.0
+const TAP_SLOP = 10.0
 
 @onready var world_container = $WorldViewport/World
 @onready var plots_root = $WorldViewport/World/Plots
@@ -137,11 +140,17 @@ var is_dragging: bool = false
 var drag_start_mouse: Vector2 = Vector2.ZERO
 var drag_start_cam: Vector2 = Vector2.ZERO
 var total_drag_dist: float = 0.0
+var touch_points: Dictionary = {}
+var touch_start: Vector2 = Vector2.ZERO
+var touch_moved: bool = false
+var touch_was_multitouch: bool = false
+var zoom_reset_btn: Button
 
 func _ready():
 	_build_isometric_grid()
 	_setup_gardener_dock()
 	_setup_resource_bar()
+	_setup_zoom_controls()
 	_build_seed_modal()
 	_build_market_modal()
 	_build_barn_modal()
@@ -184,31 +193,124 @@ func _process(_delta: float):
 	GameState.update_crop_timers()
 	_update_active_crop_labels()
 
+func _farm_modal_open() -> bool:
+	return map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible)
+
+func _input(event: InputEvent):
+	# Finish tracked touches even when released over a HUD button.
+	if event is InputEventScreenTouch and not event.pressed and touch_points.has(event.index):
+		var tapped = not event.canceled and not touch_moved and not touch_was_multitouch and not _farm_modal_open()
+		touch_points.erase(event.index)
+		if tapped:
+			_handle_isometric_click(event.position)
+		if touch_points.is_empty():
+			touch_was_multitouch = false
+			touch_moved = false
+		get_viewport().set_input_as_handled()
+	elif event is InputEventScreenDrag and touch_points.has(event.index):
+		if _farm_modal_open():
+			touch_points.clear()
+			return
+		var old_center = _touch_center()
+		var old_distance = _touch_distance()
+		var previous: Vector2 = touch_points[event.index]
+		touch_points[event.index] = event.position
+		if touch_points.size() >= 2:
+			var new_center = _touch_center()
+			if old_distance > 1.0:
+				_zoom_at(camera.zoom.x * _touch_distance() / old_distance, old_center)
+			camera.position -= (new_center - old_center) / camera.zoom
+		else:
+			if event.position.distance_to(touch_start) > TAP_SLOP:
+				touch_moved = true
+			if touch_moved or touch_was_multitouch:
+				camera.position -= (event.position - previous) / camera.zoom
+		get_viewport().set_input_as_handled()
+
 func _unhandled_input(event: InputEvent):
-	if event is InputEventMouseButton:
+	if _farm_modal_open():
+		is_dragging = false
+		return
+	if event is InputEventScreenTouch and event.pressed:
+		if touch_points.is_empty():
+			touch_start = event.position
+			touch_moved = false
+			touch_was_multitouch = false
+		touch_points[event.index] = event.position
+		if touch_points.size() > 1:
+			touch_was_multitouch = true
+		is_dragging = false
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMagnifyGesture:
+		_zoom_at(camera.zoom.x * event.factor, event.position)
+	elif event is InputEventMouseButton:
+		# Touch is handled above; ignore its synthetic mouse events.
+		if event.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				is_dragging = true
 				total_drag_dist = 0.0
-				drag_start_mouse = get_viewport().get_mouse_position()
+				drag_start_mouse = event.position
 				drag_start_cam = camera.position
 			else:
-				if is_dragging and total_drag_dist < 10.0:
-					_handle_isometric_click()
+				if is_dragging and total_drag_dist < TAP_SLOP:
+					_handle_isometric_click(event.position)
 				is_dragging = false
-		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			camera.zoom = clamp(camera.zoom * 1.1, Vector2(0.6, 0.6), Vector2(2.0, 2.0))
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			camera.zoom = clamp(camera.zoom * 0.9, Vector2(0.6, 0.6), Vector2(2.0, 2.0))
-			
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_at(camera.zoom.x * 1.1, event.position)
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_at(camera.zoom.x / 1.1, event.position)
 	elif event is InputEventMouseMotion and is_dragging:
-		var current_mouse = get_viewport().get_mouse_position()
-		total_drag_dist += (current_mouse - drag_start_mouse).length()
-		var diff = (drag_start_mouse - current_mouse) / camera.zoom
-		camera.position = drag_start_cam + diff
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			is_dragging = false
+			return
+		total_drag_dist = maxf(total_drag_dist, event.position.distance_to(drag_start_mouse))
+		camera.position = drag_start_cam + (drag_start_mouse - event.position) / camera.zoom
 
-func _handle_isometric_click():
-	var local_pos = plots_root.get_local_mouse_position()
+func _touch_center() -> Vector2:
+	var center = Vector2.ZERO
+	for point in touch_points.values():
+		center += point
+	return center / touch_points.size()
+
+func _touch_distance() -> float:
+	var points = touch_points.values()
+	return points[0].distance_to(points[1]) if points.size() >= 2 else 0.0
+
+func _zoom_at(value: float, screen_position: Vector2):
+	var old_zoom: float = camera.zoom.x
+	var new_zoom = clampf(value, MIN_ZOOM, MAX_ZOOM)
+	var offset = screen_position - get_viewport_rect().size * 0.5
+	camera.position += offset * (1.0 / old_zoom - 1.0 / new_zoom)
+	camera.zoom = Vector2.ONE * new_zoom
+	zoom_reset_btn.text = "%d%% Reset" % roundi(new_zoom * 100.0)
+
+func _setup_zoom_controls():
+	var controls = HBoxContainer.new()
+	controls.name = "ZoomControls"
+	controls.alignment = BoxContainer.ALIGNMENT_END
+	controls.add_theme_constant_override("separation", 8)
+	$HUD/Margin/VBox.add_child(controls)
+	$HUD/Margin/VBox.move_child(controls, 2)
+	for caption in ["−", "100% Reset", "+"]:
+		var button = Button.new()
+		button.text = caption
+		button.custom_minimum_size = Vector2(64, 56)
+		button.add_theme_font_size_override("font_size", 22)
+		controls.add_child(button)
+		if caption == "100% Reset":
+			zoom_reset_btn = button
+			button.pressed.connect(func():
+				camera.position = Vector2.ZERO
+				_zoom_at(1.0, get_viewport_rect().size * 0.5)
+			)
+		else:
+			var factor = 1.2 if caption == "+" else 1.0 / 1.2
+			button.pressed.connect(func(): _zoom_at(camera.zoom.x * factor, get_viewport_rect().size * 0.5))
+
+func _handle_isometric_click(screen_position: Vector2):
+	var local_pos = plots_root.get_global_transform_with_canvas().affine_inverse() * screen_position
 	var origin_x = 0.0
 	var origin_y = -60.0
 	
