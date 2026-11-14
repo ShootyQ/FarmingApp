@@ -51,7 +51,7 @@ func upgrade_tool() -> bool:
 	wood -= next_tool["cost_wood"]
 	stone -= next_tool["cost_stone"]
 	tool_tier += 1
-	message_broadcast.emit("★ Upgraded to %s!" % next_tool["name"], true)
+	message_broadcast.emit("Upgraded to %s!" % next_tool["name"], true)
 	save_game()
 	state_updated.emit()
 	return true
@@ -203,7 +203,7 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 		var relic_bonus = 1.5 if tool_tier >= 3 else 1.0
 		if randf() < (data["relic_chance"] * relic_bonus):
 			relics += 1
-			drop_text += "★ Found Rare Relic!"
+			drop_text += " [Found Rare Relic!]"
 		
 		# Turn tile into tilled soil ready for planting
 		tiles_become_soil(tile)
@@ -268,7 +268,7 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 			return
 			
 		if is_mutated:
-			message_broadcast.emit("★ LEGENDARY HARVEST! Stored %s in Barn!" % item_info["name"], true)
+			message_broadcast.emit("LEGENDARY HARVEST! Stored %s in Barn!" % item_info["name"], true)
 		else:
 			message_broadcast.emit("Harvested %s! Stored in Barn." % item_info["name"], true)
 		

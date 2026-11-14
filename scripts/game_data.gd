@@ -11,7 +11,7 @@ const CROPS = {
 		"reward": 25,
 		"grow_time": 5.0, # 5s for testing, easily tuned
 		"mutation_chance": 0.05,
-		"mutated_name": "Golden Wheat ★",
+		"mutated_name": "Golden Wheat [Rare]",
 		"mutated_reward": 100
 	},
 	"carrot": {
@@ -22,7 +22,7 @@ const CROPS = {
 		"reward": 65,
 		"grow_time": 15.0,
 		"mutation_chance": 0.05,
-		"mutated_name": "Crystal Carrot ★",
+		"mutated_name": "Crystal Carrot [Rare]",
 		"mutated_reward": 250
 	},
 	"strawberry": {
@@ -33,7 +33,7 @@ const CROPS = {
 		"reward": 160,
 		"grow_time": 45.0,
 		"mutation_chance": 0.08,
-		"mutated_name": "Jeweled Berry ★",
+		"mutated_name": "Jeweled Berry [Rare]",
 		"mutated_reward": 600
 	},
 	"pumpkin": {
@@ -44,7 +44,7 @@ const CROPS = {
 		"reward": 450,
 		"grow_time": 120.0,
 		"mutation_chance": 0.10,
-		"mutated_name": "Haunted Pumpkin ",
+		"mutated_name": "Haunted Pumpkin [Legendary]",
 		"mutated_reward": 1800
 	}
 }
@@ -116,7 +116,7 @@ const ITEMS = {
 		"desc": "Crisp golden stalks of farm-fresh wheat."
 	},
 	"golden_wheat": {
-		"name": "Golden Wheat ★",
+		"name": "Golden Wheat [Rare]",
 		"sell_value": 100,
 		"icon": "res://assets/icons/icon_golden_wheat.png",
 		"desc": "Rare golden-sheaf wheat glowing with sun energy."
@@ -128,7 +128,7 @@ const ITEMS = {
 		"desc": "Sweet, crunchy heirloom orange carrot."
 	},
 	"crystal_carrot": {
-		"name": "Crystal Carrot ★",
+		"name": "Crystal Carrot [Rare]",
 		"sell_value": 250,
 		"icon": "res://assets/icons/icon_crystal_carrot.png",
 		"desc": "A legendary prismatic crystalline root."
@@ -140,7 +140,7 @@ const ITEMS = {
 		"desc": "Plump, sun-ripened red garden strawberry."
 	},
 	"jeweled_berry": {
-		"name": "Jeweled Berry ★",
+		"name": "Jeweled Berry [Rare]",
 		"sell_value": 600,
 		"icon": "res://assets/icons/icon_jeweled_berry.png",
 		"desc": "Glittering ruby gemstone strawberry fit for royalty."
@@ -152,7 +152,7 @@ const ITEMS = {
 		"desc": "A hearty, heavy autumn prize pumpkin."
 	},
 	"haunted_pumpkin": {
-		"name": "Haunted Pumpkin ★",
+		"name": "Haunted Pumpkin [Legendary]",
 		"sell_value": 1800,
 		"icon": "res://assets/icons/icon_haunted_pumpkin.png",
 		"desc": "Spooky glowing purple pumpkin with mysterious essence."

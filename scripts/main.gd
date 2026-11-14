@@ -23,9 +23,30 @@ const ISO_H = 80.0
 
 # Gardener's Dock Controls
 var dock_barn_btn: Button
+var dock_barn_title: Label
+var dock_barn_sub: Label
+var dock_barn_icon: TextureRect
+
 var dock_active_seed_btn: Button
+var dock_seed_title: Label
+var dock_seed_sub: Label
+var dock_seed_icon: TextureRect
+
 var dock_tool_btn: Button
+var dock_tool_title: Label
+var dock_tool_sub: Label
+var dock_tool_icon: TextureRect
+
 var dock_market_btn: Button
+var dock_market_title: Label
+var dock_market_sub: Label
+var dock_market_icon: TextureRect
+
+# Dock Illustrated Icon Textures
+var tex_dock_barn = preload("res://assets/ui/dock_icon_barn.png")
+var tex_dock_seed = preload("res://assets/ui/dock_icon_seed.png")
+var tex_dock_tools = preload("res://assets/ui/dock_icon_tools.png")
+var tex_dock_market = preload("res://assets/ui/dock_icon_market.png")
 
 # Seed Drawer & Market Modal
 var seed_drawer: PanelContainer
@@ -296,61 +317,129 @@ func _setup_gardener_dock():
 		sb.set_border_width_all(2)
 		sb.border_color = border
 		sb.set_corner_radius_all(10)
-		sb.content_margin_left = 16
-		sb.content_margin_right = 16
-		sb.content_margin_top = 8
-		sb.content_margin_bottom = 8
+		sb.content_margin_left = 12
+		sb.content_margin_right = 14
+		sb.content_margin_top = 6
+		sb.content_margin_bottom = 6
 		return sb
 		
 	var normal_wood = make_wood_sb.call(Color(0.20, 0.13, 0.08, 0.94), Color(0.60, 0.45, 0.25, 0.85))
 	var hover_wood = make_wood_sb.call(Color(0.28, 0.18, 0.11, 0.98), Color(0.95, 0.80, 0.35, 1.0))
 	var active_gold = make_wood_sb.call(Color(0.24, 0.15, 0.08, 0.96), Color(1.0, 0.82, 0.25, 1.0))
 	
+	var build_dock_button_content = func(btn: Button, icon_tex: Texture2D) -> Dictionary:
+		var inner = HBoxContainer.new()
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		inner.anchors_preset = Control.PRESET_FULL_RECT
+		inner.offset_left = 10
+		inner.offset_right = -10
+		inner.offset_top = 4
+		inner.offset_bottom = -4
+		inner.alignment = BoxContainer.ALIGNMENT_CENTER
+		inner.add_theme_constant_override("separation", 10)
+		btn.add_child(inner)
+		
+		var icon_rect = TextureRect.new()
+		icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon_rect.custom_minimum_size = Vector2(38, 38)
+		icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon_rect.texture = icon_tex
+		inner.add_child(icon_rect)
+		
+		var text_vbox = VBoxContainer.new()
+		text_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		text_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		text_vbox.add_theme_constant_override("separation", 1)
+		inner.add_child(text_vbox)
+		
+		var title_lbl = Label.new()
+		title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		title_lbl.add_theme_font_size_override("font_size", 13)
+		title_lbl.add_theme_color_override("font_color", Color(1.0, 0.94, 0.82, 1.0))
+		title_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
+		title_lbl.add_theme_constant_override("shadow_offset_x", 1)
+		title_lbl.add_theme_constant_override("shadow_offset_y", 1)
+		text_vbox.add_child(title_lbl)
+		
+		var sub_lbl = Label.new()
+		sub_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		sub_lbl.add_theme_font_size_override("font_size", 11)
+		sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.95))
+		sub_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
+		sub_lbl.add_theme_constant_override("shadow_offset_x", 1)
+		sub_lbl.add_theme_constant_override("shadow_offset_y", 1)
+		text_vbox.add_child(sub_lbl)
+		
+		return {"icon": icon_rect, "title": title_lbl, "sub": sub_lbl}
+	
 	# 1. Barn Storage Shortcut Button
 	dock_barn_btn = Button.new()
-	dock_barn_btn.custom_minimum_size = Vector2(150, 56)
-	dock_barn_btn.text = "Barn (0/10)"
-	dock_barn_btn.add_theme_font_size_override("font_size", 14)
+	dock_barn_btn.custom_minimum_size = Vector2(165, 58)
+	dock_barn_btn.text = ""
 	dock_barn_btn.add_theme_stylebox_override("normal", normal_wood)
 	dock_barn_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_barn_btn.add_theme_stylebox_override("pressed", hover_wood)
 	dock_barn_btn.pressed.connect(_open_barn_modal)
+	var b_parts = build_dock_button_content.call(dock_barn_btn, tex_dock_barn)
+	dock_barn_icon = b_parts["icon"]
+	dock_barn_title = b_parts["title"]
+	dock_barn_sub = b_parts["sub"]
+	dock_barn_title.text = "Red Barn"
+	dock_barn_sub.text = "Storage (0/10)"
 	bottom_controls.add_child(dock_barn_btn)
 	
 	# 2. Active Seed Pill (Click to open Seed Pouch Drawer)
 	dock_active_seed_btn = Button.new()
-	dock_active_seed_btn.custom_minimum_size = Vector2(240, 56)
-	dock_active_seed_btn.text = "Seed: Wheat (10c) [v]"
-	dock_active_seed_btn.add_theme_font_size_override("font_size", 14)
-	dock_active_seed_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+	dock_active_seed_btn.custom_minimum_size = Vector2(230, 58)
+	dock_active_seed_btn.text = ""
 	dock_active_seed_btn.add_theme_stylebox_override("normal", active_gold)
 	dock_active_seed_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_active_seed_btn.add_theme_stylebox_override("pressed", hover_wood)
 	dock_active_seed_btn.pressed.connect(_toggle_seed_drawer)
+	var s_parts = build_dock_button_content.call(dock_active_seed_btn, tex_dock_seed)
+	dock_seed_icon = s_parts["icon"]
+	dock_seed_title = s_parts["title"]
+	dock_seed_sub = s_parts["sub"]
+	dock_seed_title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.50, 1.0))
+	dock_seed_title.text = "Active Seed"
+	dock_seed_sub.text = "Wheat (10c) [v]"
 	bottom_controls.add_child(dock_active_seed_btn)
 	
 	# 3. Tool Bench Button
 	dock_tool_btn = Button.new()
-	dock_tool_btn.custom_minimum_size = Vector2(190, 56)
-	dock_tool_btn.text = "Wooden Tools"
-	dock_tool_btn.add_theme_font_size_override("font_size", 13)
+	dock_tool_btn.custom_minimum_size = Vector2(195, 58)
+	dock_tool_btn.text = ""
 	dock_tool_btn.add_theme_stylebox_override("normal", normal_wood)
 	dock_tool_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_tool_btn.add_theme_stylebox_override("pressed", hover_wood)
 	dock_tool_btn.pressed.connect(_on_tool_upgrade_pressed)
+	var t_parts = build_dock_button_content.call(dock_tool_btn, tex_dock_tools)
+	dock_tool_icon = t_parts["icon"]
+	dock_tool_title = t_parts["title"]
+	dock_tool_sub = t_parts["sub"]
+	dock_tool_title.text = "Wooden Tools"
+	dock_tool_sub.text = "Up: 200c 20w 20s"
 	bottom_controls.add_child(dock_tool_btn)
 	
 	# 4. Market / Farm Stand Button
 	dock_market_btn = Button.new()
-	dock_market_btn.custom_minimum_size = Vector2(160, 56)
-	dock_market_btn.text = "Town Market"
-	dock_market_btn.add_theme_font_size_override("font_size", 14)
+	dock_market_btn.custom_minimum_size = Vector2(165, 58)
+	dock_market_btn.text = ""
 	var market_sb = make_wood_sb.call(Color(0.14, 0.22, 0.12, 0.94), Color(0.45, 0.75, 0.35, 0.85))
 	var market_hover = make_wood_sb.call(Color(0.18, 0.28, 0.15, 0.98), Color(0.70, 1.0, 0.50, 1.0))
 	dock_market_btn.add_theme_stylebox_override("normal", market_sb)
 	dock_market_btn.add_theme_stylebox_override("hover", market_hover)
 	dock_market_btn.add_theme_stylebox_override("pressed", market_hover)
 	dock_market_btn.pressed.connect(_open_market_modal)
+	var m_parts = build_dock_button_content.call(dock_market_btn, tex_dock_market)
+	dock_market_icon = m_parts["icon"]
+	dock_market_title = m_parts["title"]
+	dock_market_sub = m_parts["sub"]
+	dock_market_title.text = "Town Market"
+	dock_market_sub.text = "Sell Harvest"
 	bottom_controls.add_child(dock_market_btn)
 
 func _select_crop(crop_id: String):
@@ -377,20 +466,29 @@ func _setup_map_buttons():
 			map_grid.add_child(btn)
 
 func _refresh_gardener_dock():
-	if dock_barn_btn:
-		dock_barn_btn.text = "Barn (%d/10)" % GameState.get_barn_used_slots()
+	if dock_barn_sub:
+		var used = GameState.get_barn_used_slots()
+		dock_barn_sub.text = "Storage (%d/10)" % used
 		
-	if dock_active_seed_btn:
+	if dock_seed_title and dock_seed_sub:
 		var c = GameData.CROPS.get(GameState.selected_crop, {})
-		dock_active_seed_btn.text = "Seed: %s (%dc) [v]" % [c.get("name", "Wheat"), c.get("cost", 10)]
+		dock_seed_title.text = "Seed: %s" % c.get("name", "Wheat")
+		dock_seed_sub.text = "%dc • [v] Pouch" % c.get("cost", 10)
+		var item_info = GameData.get_item_info(GameState.selected_crop)
+		if dock_seed_icon:
+			if item_info.get("icon", "") != "":
+				dock_seed_icon.texture = load(item_info["icon"])
+			else:
+				dock_seed_icon.texture = tex_dock_seed
 		
-	if dock_tool_btn:
+	if dock_tool_title and dock_tool_sub:
 		var cur_tool = GameState.get_tool_info()
+		dock_tool_title.text = cur_tool.get("name", "Tools")
 		if GameState.tool_tier < GameData.TOOL_TIERS.size() - 1:
 			var next_tool = GameData.TOOL_TIERS[GameState.tool_tier + 1]
-			dock_tool_btn.text = "%s\nUp: %dc %dw %ds" % [cur_tool["name"], next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
+			dock_tool_sub.text = "Up: %dc %dw %ds" % [next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
 		else:
-			dock_tool_btn.text = "%s\n(Max Tier)" % cur_tool["name"]
+			dock_tool_sub.text = "Max Tier"
 
 func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
@@ -580,7 +678,7 @@ func _render_plot(idx: int):
 					"wheat":
 						if is_mut:
 							obj_sprite.texture = tex_wheat_legendary
-							badge.text = "★GOLDEN!★ (+%dc)" % c_data.get("mutated_reward", 100)
+							badge.text = "[GOLDEN!] (+%dc)" % c_data.get("mutated_reward", 100)
 							badge.modulate = Color(1.0, 0.88, 0.2, 1.0)
 						else:
 							obj_sprite.texture = tex_wheat_mature
@@ -589,7 +687,7 @@ func _render_plot(idx: int):
 					"carrot":
 						if is_mut:
 							obj_sprite.texture = tex_carrot_crystal
-							badge.text = "★CRYSTAL!★ (+%dc)" % c_data.get("mutated_reward", 250)
+							badge.text = "[CRYSTAL!] (+%dc)" % c_data.get("mutated_reward", 250)
 							badge.modulate = Color(0.4, 0.9, 1.0, 1.0)
 						else:
 							obj_sprite.texture = tex_carrot_mature
@@ -598,7 +696,7 @@ func _render_plot(idx: int):
 					"strawberry":
 						if is_mut:
 							obj_sprite.texture = tex_strawberry_jeweled
-							badge.text = "★JEWELED!★ (+%dc)" % c_data.get("mutated_reward", 600)
+							badge.text = "[JEWELED!] (+%dc)" % c_data.get("mutated_reward", 600)
 							badge.modulate = Color(1.0, 0.4, 0.8, 1.0)
 						else:
 							obj_sprite.texture = tex_strawberry_mature
@@ -607,7 +705,7 @@ func _render_plot(idx: int):
 					"pumpkin":
 						if is_mut:
 							obj_sprite.texture = tex_pumpkin_haunted
-							badge.text = "★HAUNTED!★ (+%dc)" % c_data.get("mutated_reward", 1800)
+							badge.text = "[HAUNTED!] (+%dc)" % c_data.get("mutated_reward", 1800)
 							badge.modulate = Color(0.7, 0.4, 1.0, 1.0)
 						else:
 							obj_sprite.texture = tex_pumpkin_mature
