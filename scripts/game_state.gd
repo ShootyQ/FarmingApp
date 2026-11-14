@@ -8,6 +8,7 @@ signal tile_updated(sector_coord: String, tile_idx: int)
 signal message_broadcast(text: String, is_reward: bool)
 signal barn_opened
 signal barn_updated
+signal tool_used(sector_coord: String, tile_idx: int, tool_id: String)
 
 var coins: int = 150
 var wood: int = 10
@@ -165,22 +166,26 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 	
 	var tile = tiles[tile_idx]
 	var tile_type = tile.get("type", "grass")
+	var tool_id = GameData.get_tool_for_tile(tile)
+	var used_tool = false
 	
 	match tile_type:
 		"obstacle":
-			_handle_tap_obstacle(sector_coord, tile_idx, tile)
+			used_tool = _handle_tap_obstacle(sector_coord, tile_idx, tile)
 		"soil":
 			_handle_tap_soil(sector_coord, tile_idx, tile)
 		"grass":
-			_handle_tap_grass(sector_coord, tile_idx, tile)
+			used_tool = _handle_tap_grass(sector_coord, tile_idx, tile)
 		"barn":
 			barn_opened.emit()
 	
 	tile_updated.emit(sector_coord, tile_idx)
+	if used_tool:
+		tool_used.emit(sector_coord, tile_idx, tool_id)
 	state_updated.emit()
 	save_game()
 
-func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary):
+func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary) -> bool:
 	var obs_id = tile["obstacle_id"]
 	var data = GameData.OBSTACLES[obs_id]
 	
@@ -188,14 +193,14 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 	if tool_tier < data["required_tool_tier"]:
 		var req_tier_name = GameData.TOOL_TIERS[data["required_tool_tier"]]["name"]
 		message_broadcast.emit("Requires %s to clear!" % req_tier_name, false)
-		return
+		return false
 	
-	# Tap damage: Golden tools clear 2x faster
+	# Iron and Golden tools deal two damage per tap.
 	var damage = 2 if tool_tier >= 2 else 1
 	tile["taps_left"] = max(0, tile["taps_left"] - damage)
 	
 	if tile["taps_left"] > 0:
-		message_broadcast.emit("Chipping away at %s... (%d taps left)" % [data["name"], tile["taps_left"]], false)
+		message_broadcast.emit("Chipping away at %s... (%d taps left)" % [data["name"], ceili(float(tile["taps_left"]) / damage)], false)
 	else:
 		# Obstacle cleared! Give drops
 		var drop_text = "Cleared %s! " % data["name"]
@@ -216,6 +221,7 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 		# Turn tile into tilled soil ready for planting
 		tiles_become_soil(tile)
 		message_broadcast.emit(drop_text, true)
+	return true
 
 func tiles_become_soil(tile: Dictionary):
 	tile.clear()
@@ -226,15 +232,17 @@ func tiles_become_soil(tile: Dictionary):
 	tile["plant_time"] = 0.0
 	tile["grow_duration"] = 0.0
 
-func _handle_tap_grass(sector_coord: String, tile_idx: int, tile: Dictionary):
+func _handle_tap_grass(sector_coord: String, tile_idx: int, tile: Dictionary) -> bool:
 	# Till grass into farm soil for 5 coins
 	var till_cost = 5
 	if coins >= till_cost:
 		coins -= till_cost
 		tiles_become_soil(tile)
 		message_broadcast.emit("Tilled fertile soil plot! (-5c)", true)
+		return true
 	else:
 		message_broadcast.emit("Need 5 coins to till soil!", false)
+		return false
 
 func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 	var state = tile["state"]

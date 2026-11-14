@@ -14,22 +14,26 @@ func _run():
 	await process_frame
 	assert(farm.mobile_ui, "Run with -- --mobile-ui")
 	var width = farm.get_viewport_rect().size.x
-	assert(is_equal_approx(width, 440), "Phone logical width")
+	assert(is_equal_approx(width, 440 if root.size.y >= root.size.x else 900), "Mobile logical width")
 	for button in [farm.dock_barn_btn, farm.dock_active_seed_btn, farm.dock_tool_btn, farm.dock_market_btn]:
 		_assert_fits(button, width)
 		assert(button.size.y >= 48, "Touch target height")
 	_assert_fits(farm.resources_container, width)
 	_assert_fits(farm.barn_btn, width)
-	for open_modal in [farm._open_seed_modal, farm._open_market_modal, farm._open_barn_modal]:
+	for open_modal in [farm._open_seed_modal, farm._open_market_modal, farm._open_barn_modal, farm._open_tool_menu]:
 		open_modal.call()
 		await process_frame
 		await process_frame
-		var modal = farm.seed_modal if farm.seed_modal.visible else (farm.market_modal if farm.market_modal.visible else farm.barn_modal)
+		var modal = farm.tool_menu if farm.tool_menu.visible else (farm.seed_modal if farm.seed_modal.visible else (farm.market_modal if farm.market_modal.visible else farm.barn_modal))
 		for child in modal.get_children():
 			if child is PanelContainer:
 				_assert_fits(child, width)
+		if farm.tool_menu.visible:
+			_assert_fits(farm.tool_menu.upgrade_button, width)
+			assert(farm.tool_menu.upgrade_button.get_global_rect().end.y <= farm.get_viewport_rect().size.y, "Upgrade footer stays visible")
 		farm.seed_modal.visible = false
 		farm.market_modal.visible = false
 		farm.barn_modal.visible = false
+		farm.tool_menu.visible = false
 	print("PASS: mobile HUD, touch targets, and menus fit phone width")
 	quit()

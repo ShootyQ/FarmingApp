@@ -144,6 +144,9 @@ var touch_points: Dictionary = {}
 var touch_start: Vector2 = Vector2.ZERO
 var touch_moved: bool = false
 var touch_was_multitouch: bool = false
+var tool_menu: Control
+var tool_effects: Node2D
+var effect_sector: String = ""
 var mobile_ui: bool = false
 var zoom_reset_btn: Button
 
@@ -167,6 +170,14 @@ func _ready():
 	_build_market_modal()
 	_build_barn_modal()
 	_setup_map_buttons()
+	tool_menu = preload("res://scripts/tool_menu.gd").new()
+	$HUD.add_child(tool_menu)
+	tool_menu.setup(mobile_ui)
+	tool_effects = preload("res://scripts/tool_effects.gd").new()
+	tool_effects.name = "ToolEffects"
+	tool_effects.z_index = 100
+	world_container.add_child(tool_effects)
+	GameState.tool_used.connect(_on_tool_used)
 	
 	GameState.state_updated.connect(_refresh_ui)
 	GameState.tile_updated.connect(_on_tile_updated)
@@ -189,7 +200,10 @@ func _ready():
 		
 	var map_btn = $HUD/Margin/VBox/TopBar/SectorInfo/MapBtn
 	map_btn.add_theme_stylebox_override("normal", make_wood_small_sb.call())
-	map_btn.pressed.connect(func(): map_modal.visible = true)
+	map_btn.pressed.connect(func():
+		_close_farm_menus()
+		map_modal.visible = true
+	)
 	$HUD/MapModal/Panel/VBox/CloseMapBtn.pressed.connect(func(): map_modal.visible = false)
 	
 	barn_btn = Button.new()
@@ -290,7 +304,7 @@ func _process(_delta: float):
 	_update_active_crop_labels()
 
 func _farm_modal_open() -> bool:
-	return map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible)
+	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible)
 
 func _input(event: InputEvent):
 	# Finish tracked touches even when released over a HUD button.
@@ -708,7 +722,7 @@ func _setup_gardener_dock():
 	dock_tool_btn.add_theme_stylebox_override("normal", normal_wood)
 	dock_tool_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_tool_btn.add_theme_stylebox_override("pressed", hover_wood)
-	dock_tool_btn.pressed.connect(_on_tool_upgrade_pressed)
+	dock_tool_btn.pressed.connect(_open_tool_menu)
 	var t_parts = build_dock_button_content.call(dock_tool_btn, tex_dock_tools)
 	dock_tool_icon = t_parts["icon"]
 	dock_tool_title = t_parts["title"]
@@ -783,27 +797,38 @@ func _refresh_gardener_dock():
 				dock_seed_icon.texture = tex_dock_seed
 		
 	if dock_tool_title and dock_tool_sub:
-		var cur_tool = GameState.get_tool_info()
-		dock_tool_title.text = cur_tool.get("name", "Tools")
-		if GameState.tool_tier < GameData.TOOL_TIERS.size() - 1:
-			var next_tool = GameData.TOOL_TIERS[GameState.tool_tier + 1]
-			dock_tool_sub.text = "Up: %dc %dw %ds" % [next_tool["cost_coins"], next_tool["cost_wood"], next_tool["cost_stone"]]
-		else:
-			dock_tool_sub.text = "Max Tier"
+		dock_tool_title.text = "Farm Tools"
+		dock_tool_sub.text = "%s • Upgrade" % GameData.TOOL_MATERIALS[GameState.tool_tier].capitalize()
 
 func _on_plot_clicked(idx: int):
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
 	_render_plot(idx)
 
-func _on_tool_upgrade_pressed():
-	if GameState.can_upgrade_tool():
-		GameState.upgrade_tool()
-	else:
-		if GameState.tool_tier >= GameData.TOOL_TIERS.size() - 1:
-			_show_message("Maximum tool tier reached!", false)
-		else:
-			var next = GameData.TOOL_TIERS[GameState.tool_tier + 1]
-			_show_message("Need %dc, %dw, %ds for %s!" % [next["cost_coins"], next["cost_wood"], next["cost_stone"], next["name"]], false)
+func _close_farm_menus():
+	for modal in [map_modal, seed_modal, market_modal, barn_modal, tool_menu]:
+		if modal:
+			modal.visible = false
+	is_dragging = false
+	touch_points.clear()
+	touch_moved = false
+	touch_was_multitouch = false
+
+func _open_tool_menu():
+	_close_farm_menus()
+	tool_menu.refresh()
+	tool_menu.visible = true
+
+func _on_tool_used(coord: String, tile_idx: int, tool_id: String):
+	if coord != GameState.current_sector_coord or tile_idx >= plot_nodes.size():
+		return
+	var tile: Dictionary = GameState.sector_tiles[coord][tile_idx]
+	var feedback = "Tilled!" if tool_id == "hoe" else "Cleared!"
+	if tile.get("type") == "obstacle":
+		var damage = 2 if GameState.tool_tier >= 2 else 1
+		feedback = "%d hits left" % ceili(float(tile["taps_left"]) / damage)
+	elif tool_id == "hoe":
+		feedback = "Soil ready!"
+	tool_effects.play(tile_idx, plots_root.position + plot_nodes[tile_idx].position, tool_id, GameState.tool_tier, feedback)
 
 func _on_map_sector_clicked(coord: String):
 	if GameState.is_sector_unlocked(coord):
@@ -825,6 +850,11 @@ func _on_map_sector_clicked(coord: String):
 			_show_message("Must unlock an adjacent plot first!", false)
 
 func _refresh_ui():
+	if tool_effects and effect_sector != GameState.current_sector_coord:
+		tool_effects.clear()
+		effect_sector = GameState.current_sector_coord
+	if tool_menu and tool_menu.visible:
+		tool_menu.refresh()
 	if coins_label:
 		coins_label.text = _format_number(GameState.coins)
 	if wood_label:
@@ -912,7 +942,7 @@ func _render_plot(idx: int):
 				_:
 					obj_sprite.texture = tex_weeds[0]
 			
-			badge.text = "%d" % tile["taps_left"]
+			badge.text = "%d hits" % ceili(float(tile["taps_left"]) / (2 if GameState.tool_tier >= 2 else 1))
 			if obs["required_tool_tier"] > GameState.tool_tier:
 				badge.modulate = Color(1.0, 0.45, 0.45, 1.0)
 				obj_sprite.modulate = Color(1.0, 0.6, 0.6)
@@ -1267,10 +1297,7 @@ func _build_barn_modal():
 	frame.add_child(barn_detail_label)
 
 func _open_barn_modal():
-	if seed_modal:
-		seed_modal.visible = false
-	if market_modal:
-		market_modal.visible = false
+	_close_farm_menus()
 	barn_modal.visible = true
 	_refresh_barn_modal()
 
@@ -1413,10 +1440,7 @@ func _build_seed_modal():
 	scroll.add_child(seed_modal_items_vbox)
 
 func _open_seed_modal():
-	if market_modal:
-		market_modal.visible = false
-	if barn_modal:
-		barn_modal.visible = false
+	_close_farm_menus()
 	seed_modal.visible = true
 	_refresh_seed_modal()
 
@@ -1689,10 +1713,7 @@ func _build_market_modal():
 	bottom_h.add_child(sell_all_btn)
 
 func _open_market_modal():
-	if seed_modal:
-		seed_modal.visible = false
-	if barn_modal:
-		barn_modal.visible = false
+	_close_farm_menus()
 	market_modal.visible = true
 	_refresh_market_modal()
 

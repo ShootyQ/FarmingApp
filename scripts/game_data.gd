@@ -167,6 +167,28 @@ func get_item_info(item_id: String) -> Dictionary:
 		"desc": "Farm produce stored safely in the barn."
 	})
 
+# Tools share the saved material tier; selection follows the tapped tile.
+const TOOL_MATERIALS = ["wooden", "copper", "iron", "golden"]
+const TOOLS = {
+	"axe": {"name": "Axe", "purpose": "Clears fallen branches and hardwood stumps.", "requirements": "Wooden: branches. Copper: hardwood stumps."},
+	"pickaxe": {"name": "Pickaxe", "purpose": "Breaks rocks, boulders, and relic mounds.", "requirements": "Wooden: pebbles. Copper: granite. Iron: relic mounds."},
+	"hoe": {"name": "Hoe", "purpose": "Clears weeds and tills grass into planting soil.", "requirements": "Available at every tier. Tilling grass costs 5 coins."}
+}
+const OBSTACLE_TOOLS = {
+	"weed": "hoe", "small_wood": "axe", "hardwood_stump": "axe",
+	"small_rock": "pickaxe", "granite_boulder": "pickaxe", "ancient_relic_mound": "pickaxe"
+}
+
+func get_tool_for_tile(tile: Dictionary) -> String:
+	if tile.get("type") == "grass":
+		return "hoe"
+	if tile.get("type") == "obstacle":
+		return OBSTACLE_TOOLS.get(tile.get("obstacle_id", ""), "")
+	return ""
+
+func get_tool_icon_path(tool_id: String, tier: int) -> String:
+	return "res://assets/tools/%s_%s.svg" % [tool_id, TOOL_MATERIALS[clampi(tier, 0, 3)]]
+
 # Tool Tiers
 const TOOL_TIERS = [
 	{
@@ -191,7 +213,7 @@ const TOOL_TIERS = [
 		"cost_coins": 800,
 		"cost_wood": 60,
 		"cost_stone": 60,
-		"description": "Breaks Mysterious Mounds and ancient ruins. 2x clearing speed!"
+		"description": "Unlocks mysterious mounds. Deals 2 damage per clearing tap."
 	},
 	{
 		"name": "Golden Tools",
@@ -199,7 +221,7 @@ const TOOL_TIERS = [
 		"cost_coins": 3000,
 		"cost_wood": 150,
 		"cost_stone": 150,
-		"description": "Instant clearing on basic obstacles and +50% rare relic drops!"
+		"description": "Deals 2 damage per clearing tap and +50% rare relic chance."
 	}
 ]
 
