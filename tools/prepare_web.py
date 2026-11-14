@@ -30,6 +30,12 @@ config["fileSizes"] = {
 html = html[:match.start(1)] + json.dumps(config, separators=(",", ":")) + html[match.end(1):]
 html = html.replace('src="index.js"', 'src="' + base + '.js"')
 html = html.replace("<head>", '<head><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">', 1)
+html = html.replace('initial-scale=1.0', 'initial-scale=1.0, viewport-fit=cover')
+html = html.replace('</head>', """<style>
+html, body { width: 100%; height: 100%; overscroll-behavior: none; }
+#canvas { touch-action: none; }
+:fullscreen { width: 100vw; height: 100dvh; background: #909327; }
+</style></head>""")
 html_path.write_text(html)
 (build_dir / ".nojekyll").touch()
 

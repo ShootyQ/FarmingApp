@@ -144,9 +144,21 @@ var touch_points: Dictionary = {}
 var touch_start: Vector2 = Vector2.ZERO
 var touch_moved: bool = false
 var touch_was_multitouch: bool = false
+var mobile_ui: bool = false
 var zoom_reset_btn: Button
 
 func _ready():
+	mobile_ui = OS.has_feature("mobile") or "--mobile-ui" in OS.get_cmdline_user_args()
+	if OS.has_feature("web"):
+		mobile_ui = JavaScriptBridge.eval("matchMedia('(pointer: coarse)').matches || innerWidth < 700") == true
+	if mobile_ui:
+		_apply_mobile_scale()
+		get_window().size_changed.connect(_apply_mobile_scale)
+	if mobile_ui:
+		var touch_theme = Theme.new()
+		touch_theme.default_font_size = 17
+		touch_theme.set_constant("outline_size", "Button", 0)
+		theme = touch_theme
 	_build_isometric_grid()
 	_setup_gardener_dock()
 	_setup_resource_bar()
@@ -186,8 +198,92 @@ func _ready():
 	barn_btn.pressed.connect(_open_barn_modal)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(barn_btn)
 	
+	if mobile_ui:
+		_setup_mobile_hud()
 	_select_crop("wheat")
 	_refresh_ui()
+
+func _apply_mobile_scale():
+	var window_size = get_window().size
+	if window_size.x <= 0 or window_size.y <= 0:
+		return
+	# Use phone-sized logical pixels instead of shrinking the 1280px desktop HUD.
+	var width = 440 if window_size.y >= window_size.x else 900
+	get_window().content_scale_size = Vector2i(width, roundi(float(width) * window_size.y / window_size.x))
+	if is_instance_valid(bottom_controls):
+		bottom_controls.columns = 2 if width == 440 else 4
+
+func _toggle_fullscreen():
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("""
+			if (document.fullscreenElement) {
+				document.exitFullscreen();
+			} else if (document.documentElement.requestFullscreen) {
+				document.documentElement.requestFullscreen().catch(console.warn);
+			}
+		""")
+	else:
+		var mode = DisplayServer.WINDOW_MODE_WINDOWED if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN else DisplayServer.WINDOW_MODE_FULLSCREEN
+		DisplayServer.window_set_mode(mode)
+
+func _fit_mobile_panel(panel: Control):
+	panel.custom_minimum_size = Vector2.ZERO
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	panel.offset_left = 12
+	panel.offset_right = -12
+	panel.offset_top = 12
+	panel.offset_bottom = -12
+
+func _setup_mobile_hud():
+	var vbox = $HUD/Margin/VBox
+	resources_container.reparent(vbox)
+	vbox.move_child(resources_container, 1)
+	resources_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	sector_title.text = "Homestead"
+	sector_title.add_theme_font_size_override("font_size", 17)
+	sector_title.clip_text = true
+	sector_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_controls.columns = 2 if get_window().size.y >= get_window().size.x else 4
+	$HUD/Margin/VBox/TopBar/SectorInfo.add_theme_constant_override("separation", 8)
+	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.text = "Map"
+	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.custom_minimum_size.y = 48
+	barn_btn.custom_minimum_size.y = 48
+	status_banner.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_banner.add_theme_font_size_override("font_size", 15)
+	for button in [dock_barn_btn, dock_active_seed_btn, dock_tool_btn, dock_market_btn]:
+		button.custom_minimum_size = Vector2(194, 68)
+	bottom_controls.add_theme_constant_override("h_separation", 8)
+	bottom_controls.add_theme_constant_override("v_separation", 8)
+	_fit_mobile_panel($HUD/MapModal/Panel)
+	# Reuse barn contents in a touch-sized scrollable card.
+	var frame = barn_slots_container.get_parent()
+	var panel = PanelContainer.new()
+	barn_modal.add_child(panel)
+	_fit_mobile_panel(panel)
+	var column = VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	panel.add_child(column)
+	var close = Button.new()
+	close.text = "Close Barn"
+	close.custom_minimum_size.y = 48
+	close.pressed.connect(func(): barn_modal.visible = false)
+	column.add_child(close)
+	barn_title_label.reparent(column)
+	barn_title_label.custom_minimum_size = Vector2.ZERO
+	barn_title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	barn_title_label.add_theme_font_size_override("font_size", 20)
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(scroll)
+	barn_slots_container.reparent(scroll)
+	barn_slots_container.columns = 3
+	barn_slots_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for slot in barn_slots_container.get_children():
+		slot.custom_minimum_size = Vector2(112, 112)
+	barn_detail_label.reparent(column)
+	barn_detail_label.custom_minimum_size = Vector2(0, 96)
+	barn_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	frame.queue_free()
 
 func _process(_delta: float):
 	GameState.update_crop_timers()
@@ -289,15 +385,20 @@ func _zoom_at(value: float, screen_position: Vector2):
 func _setup_zoom_controls():
 	var controls = HBoxContainer.new()
 	controls.name = "ZoomControls"
-	controls.alignment = BoxContainer.ALIGNMENT_END
+	controls.alignment = BoxContainer.ALIGNMENT_CENTER if mobile_ui else BoxContainer.ALIGNMENT_END
 	controls.add_theme_constant_override("separation", 8)
 	$HUD/Margin/VBox.add_child(controls)
 	$HUD/Margin/VBox.move_child(controls, 2)
+	var fullscreen_btn = Button.new()
+	fullscreen_btn.text = "Full screen"
+	fullscreen_btn.custom_minimum_size = Vector2(116, 48)
+	fullscreen_btn.pressed.connect(_toggle_fullscreen)
+	controls.add_child(fullscreen_btn)
 	for caption in ["−", "100% Reset", "+"]:
 		var button = Button.new()
 		button.text = caption
-		button.custom_minimum_size = Vector2(64, 56)
-		button.add_theme_font_size_override("font_size", 22)
+		button.custom_minimum_size = Vector2(48, 48) if mobile_ui else Vector2(64, 56)
+		button.add_theme_font_size_override("font_size", 18 if mobile_ui else 22)
 		controls.add_child(button)
 		if caption == "100% Reset":
 			zoom_reset_btn = button
@@ -481,7 +582,7 @@ func _setup_resource_bar():
 		val_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		val_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		val_lbl.add_theme_font_size_override("font_size", 14)
+		val_lbl.add_theme_font_size_override("font_size", 18 if mobile_ui else 14)
 		val_lbl.add_theme_color_override("font_color", text_col)
 		val_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
 		val_lbl.add_theme_constant_override("shadow_offset_x", 1)
@@ -500,7 +601,7 @@ func _setup_gardener_dock():
 	for child in bottom_controls.get_children():
 		child.queue_free()
 	
-	bottom_controls.alignment = BoxContainer.ALIGNMENT_CENTER
+	bottom_controls.columns = 2 if mobile_ui else 4
 	bottom_controls.add_theme_constant_override("separation", 14)
 	
 	var make_wood_sb = func(bg: Color, border: Color) -> StyleBoxFlat:
@@ -522,7 +623,7 @@ func _setup_gardener_dock():
 	var build_dock_button_content = func(btn: Button, icon_tex: Texture2D) -> Dictionary:
 		var inner = HBoxContainer.new()
 		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		inner.anchors_preset = Control.PRESET_FULL_RECT
+		inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		inner.offset_left = 10
 		inner.offset_right = -10
 		inner.offset_top = 4
@@ -548,7 +649,7 @@ func _setup_gardener_dock():
 		var title_lbl = Label.new()
 		title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		title_lbl.add_theme_font_size_override("font_size", 13)
+		title_lbl.add_theme_font_size_override("font_size", 17 if mobile_ui else 13)
 		title_lbl.add_theme_color_override("font_color", Color(1.0, 0.94, 0.82, 1.0))
 		title_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
 		title_lbl.add_theme_constant_override("shadow_offset_x", 1)
@@ -558,7 +659,7 @@ func _setup_gardener_dock():
 		var sub_lbl = Label.new()
 		sub_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		sub_lbl.add_theme_font_size_override("font_size", 11)
+		sub_lbl.add_theme_font_size_override("font_size", 12 if mobile_ui else 11)
 		sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.95))
 		sub_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
 		sub_lbl.add_theme_constant_override("shadow_offset_x", 1)
@@ -734,7 +835,7 @@ func _refresh_ui():
 		relics_label.text = _format_number(GameState.relics)
 	
 	var s_info = GameData.SECTORS.get(GameState.current_sector_coord, {})
-	sector_title.text = "%s (%s)" % [s_info.get("name", "Farm"), GameState.current_sector_coord]
+	sector_title.text = s_info.get("name", "Farm") if mobile_ui else "%s (%s)" % [s_info.get("name", "Farm"), GameState.current_sector_coord]
 	
 	if barn_btn:
 		barn_btn.text = "Barn (%d/10)" % GameState.get_barn_used_slots()
@@ -1051,6 +1152,7 @@ func _build_barn_modal():
 	# Close button (top right)
 	var close_btn = Button.new()
 	close_btn.text = " [X] Close "
+	close_btn.custom_minimum_size.y = 48 if mobile_ui else 0
 	close_btn.position = Vector2(740, 24)
 	close_btn.custom_minimum_size = Vector2(90, 36)
 	close_btn.pressed.connect(func(): barn_modal.visible = false)
@@ -1257,17 +1359,19 @@ func _build_seed_modal():
 	psb.content_margin_bottom = 18
 	panel.add_theme_stylebox_override("panel", psb)
 	seed_modal.add_child(panel)
+	if mobile_ui:
+		_fit_mobile_panel(panel)
 	
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
 	
 	# Top bar: Title & Close
-	var top_h = HBoxContainer.new()
+	var top_h = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
 	vbox.add_child(top_h)
 	
 	var title = Label.new()
-	title.text = "SEED POUCH & NURSERY MERCHANT"
+	title.text = "Seeds & Nursery" if mobile_ui else "SEED POUCH & NURSERY MERCHANT"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55, 1.0))
@@ -1275,17 +1379,19 @@ func _build_seed_modal():
 	
 	var close_btn = Button.new()
 	close_btn.text = " [X] Close "
+	close_btn.custom_minimum_size.y = 48 if mobile_ui else 0
 	close_btn.pressed.connect(func(): seed_modal.visible = false)
 	top_h.add_child(close_btn)
 	
 	# Subtitle / Coins info
-	var sub_h = HBoxContainer.new()
+	var sub_h = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
 	vbox.add_child(sub_h)
 	
 	var sub = Label.new()
 	sub.text = "Equip seeds for planting, or buy new seed packets with gold coins."
 	sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sub.add_theme_font_size_override("font_size", 13)
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.add_theme_font_size_override("font_size", 16 if mobile_ui else 13)
 	sub.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
 	sub_h.add_child(sub)
 	
@@ -1298,7 +1404,7 @@ func _build_seed_modal():
 	# Scrollable container for seed cards
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(0, 360)
+	scroll.custom_minimum_size = Vector2(0, 100 if mobile_ui else 360)
 	vbox.add_child(scroll)
 	
 	seed_modal_items_vbox = VBoxContainer.new()
@@ -1346,7 +1452,7 @@ func _refresh_seed_modal():
 		r_sb.content_margin_bottom = 8
 		row.add_theme_stylebox_override("panel", r_sb)
 		
-		var rh = HBoxContainer.new()
+		var rh = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
 		rh.add_theme_constant_override("separation", 14)
 		row.add_child(rh)
 		
@@ -1379,13 +1485,13 @@ func _refresh_seed_modal():
 		if is_equipped:
 			var eq_tag = Label.new()
 			eq_tag.text = "[EQUIPPED]"
-			eq_tag.add_theme_font_size_override("font_size", 12)
+			eq_tag.add_theme_font_size_override("font_size", 15 if mobile_ui else 12)
 			eq_tag.add_theme_color_override("font_color", Color(1.0, 0.85, 0.25, 1.0))
 			title_h.add_child(eq_tag)
 			
 		var stats_lbl = Label.new()
 		stats_lbl.text = "Grow: %ds • Harvest: +%dc • Unit Cost: %dc" % [int(c["grow_time"]), c["reward"], c["cost"]]
-		stats_lbl.add_theme_font_size_override("font_size", 12)
+		stats_lbl.add_theme_font_size_override("font_size", 15 if mobile_ui else 12)
 		stats_lbl.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.9))
 		info_v.add_child(stats_lbl)
 		
@@ -1396,7 +1502,7 @@ func _refresh_seed_modal():
 		else:
 			stock_lbl.text = "Out of seeds! (Buy packets to the right)"
 			stock_lbl.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45, 1.0))
-		stock_lbl.add_theme_font_size_override("font_size", 12)
+		stock_lbl.add_theme_font_size_override("font_size", 15 if mobile_ui else 12)
 		info_v.add_child(stock_lbl)
 		
 		# 3. Actions HBox (Equip, Buy 1, Buy 5)
@@ -1407,7 +1513,7 @@ func _refresh_seed_modal():
 		
 		# Equip Button
 		var eq_btn = Button.new()
-		eq_btn.custom_minimum_size = Vector2(96, 38)
+		eq_btn.custom_minimum_size = Vector2(96, 48 if mobile_ui else 38)
 		if is_equipped:
 			eq_btn.text = "Equipped"
 			eq_btn.disabled = true
@@ -1422,7 +1528,7 @@ func _refresh_seed_modal():
 		
 		# Buy 1x Button
 		var buy1_btn = Button.new()
-		buy1_btn.custom_minimum_size = Vector2(90, 38)
+		buy1_btn.custom_minimum_size = Vector2(90, 48 if mobile_ui else 38)
 		buy1_btn.text = "+1 (%dc)" % c["cost"]
 		var cid_b1 = crop_id
 		buy1_btn.pressed.connect(func():
@@ -1433,7 +1539,7 @@ func _refresh_seed_modal():
 		
 		# Buy 5x Button
 		var buy5_btn = Button.new()
-		buy5_btn.custom_minimum_size = Vector2(96, 38)
+		buy5_btn.custom_minimum_size = Vector2(96, 48 if mobile_ui else 38)
 		buy5_btn.text = "+5 (%dc)" % (c["cost"] * 5)
 		var cid_b5 = crop_id
 		buy5_btn.pressed.connect(func():
@@ -1487,17 +1593,19 @@ func _build_market_modal():
 	psb.content_margin_bottom = 18
 	panel.add_theme_stylebox_override("panel", psb)
 	market_modal.add_child(panel)
+	if mobile_ui:
+		_fit_mobile_panel(panel)
 	
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
 	
 	# Top bar of modal: Title & Close
-	var top_h = HBoxContainer.new()
+	var top_h = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
 	vbox.add_child(top_h)
 	
 	var title = Label.new()
-	title.text = "TOWN MARKET & FARM STAND"
+	title.text = "Town Market" if mobile_ui else "TOWN MARKET & FARM STAND"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
@@ -1510,17 +1618,19 @@ func _build_market_modal():
 	
 	var close_btn = Button.new()
 	close_btn.text = " [X] Close "
+	close_btn.custom_minimum_size.y = 48 if mobile_ui else 0
 	close_btn.pressed.connect(func(): market_modal.visible = false)
 	top_h.add_child(close_btn)
 	
 	# Subtitle / Balance
-	var sub_h = HBoxContainer.new()
+	var sub_h = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
 	vbox.add_child(sub_h)
 	
 	var sub = Label.new()
 	sub.text = "Sell your harvested crops from the Barn for gold coins!"
 	sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sub.add_theme_font_size_override("font_size", 13)
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.add_theme_font_size_override("font_size", 16 if mobile_ui else 13)
 	sub.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
 	sub_h.add_child(sub)
 	
@@ -1532,7 +1642,7 @@ func _build_market_modal():
 	
 	# Scroll area for items stored in Barn
 	var scroll = ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 300)
+	scroll.custom_minimum_size = Vector2(0, 100 if mobile_ui else 300)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(scroll)
 	
@@ -1543,6 +1653,7 @@ func _build_market_modal():
 	
 	market_empty_label = Label.new()
 	market_empty_label.text = "Your Barn has no crops yet!\nGrow and harvest crops on your farm to store and sell them here."
+	market_empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	market_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	market_empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	market_empty_label.custom_minimum_size = Vector2(0, 180)
@@ -1618,7 +1729,7 @@ func _refresh_market_modal():
 		rsb.content_margin_bottom = 8
 		row.add_theme_stylebox_override("panel", rsb)
 		
-		var rh = HBoxContainer.new()
+		var rh = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
 		rh.add_theme_constant_override("separation", 14)
 		row.add_child(rh)
 		
@@ -1643,13 +1754,15 @@ func _refresh_market_modal():
 		name_v.add_child(nl)
 		
 		var pl = Label.new()
+		pl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pl.text = "Value: +%dc each • Total: +%dc" % [unit_price, total_price]
-		pl.add_theme_font_size_override("font_size", 12)
+		pl.add_theme_font_size_override("font_size", 15 if mobile_ui else 12)
 		pl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35, 0.95))
 		name_v.add_child(pl)
 		
 		# Sell 1 Button
 		var s1 = Button.new()
+		s1.custom_minimum_size.y = 48 if mobile_ui else 0
 		s1.text = " Sell 1 (+%dc) " % unit_price
 		var slot_idx = i
 		s1.pressed.connect(func():
@@ -1660,6 +1773,7 @@ func _refresh_market_modal():
 		
 		# Sell All Button
 		var sa = Button.new()
+		sa.custom_minimum_size.y = 48 if mobile_ui else 0
 		sa.text = " Sell All (+%dc) " % total_price
 		sa.pressed.connect(func():
 			GameState.sell_from_barn(slot_idx, count)
