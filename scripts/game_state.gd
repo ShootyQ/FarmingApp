@@ -18,6 +18,14 @@ var tool_tier: int = 0
 var selected_crop: String = "wheat"
 var current_sector_coord: String = "1,1"
 
+# Seed Inventory / Seed Pouch (Stock of seeds held by player)
+var seed_inventory: Dictionary = {
+	"wheat": 10,
+	"carrot": 5,
+	"strawberry": 2,
+	"pumpkin": 0
+}
+
 # Barn Storage: 10 spaces, stack size up to 10
 const BARN_SLOTS_MAX: int = 10
 const BARN_STACK_MAX: int = 10
@@ -232,21 +240,23 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 	var state = tile["state"]
 	
 	if state == "empty":
-		# Plant selected seed
+		# Plant selected seed from seed inventory
 		var crop_data = GameData.CROPS.get(selected_crop, {})
-		var cost = crop_data.get("cost", 10)
-		if coins >= cost:
-			coins -= cost
+		var crop_name = crop_data.get("name", "Crop")
+		var seed_count = get_seed_count(selected_crop)
+		if seed_count > 0:
+			seed_inventory[selected_crop] -= 1
 			tile["state"] = "growing"
 			tile["crop"] = selected_crop
 			tile["plant_time"] = Time.get_unix_time_from_system()
 			tile["grow_duration"] = crop_data["grow_time"]
-			
-			# Check legendary mutation roll at plant time
 			tile["is_mutated"] = (randf() < crop_data["mutation_chance"])
-			message_broadcast.emit("Planted %s%s!" % [crop_data["emoji"], crop_data["name"]], true)
+			message_broadcast.emit("Planted %s! (%d seeds remaining in pouch)" % [crop_name, seed_inventory[selected_crop]], true)
+			tile_updated.emit(sector_coord, tile_idx)
+			state_updated.emit()
+			save_game()
 		else:
-			message_broadcast.emit("Not enough coins for seeds! Need %dc" % cost, false)
+			message_broadcast.emit("Out of %s seeds! Click Active Seed on dock to buy more." % crop_name, false)
 			
 	elif state == "ready":
 		# Harvest crop directly into Barn storage (no direct coins)
@@ -310,6 +320,7 @@ func save_game():
 		"unlocked_sectors": unlocked_sectors,
 		"sector_tiles": sector_tiles,
 		"barn_inventory": barn_inventory,
+		"seed_inventory": seed_inventory,
 		"save_time": Time.get_unix_time_from_system()
 	}
 	var file = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -352,6 +363,16 @@ func load_game():
 	# Load barn storage
 	barn_inventory = parsed.get("barn_inventory", [])
 	
+	# Load seed inventory
+	var loaded_seeds = parsed.get("seed_inventory", {})
+	if typeof(loaded_seeds) == TYPE_DICTIONARY and loaded_seeds.size() > 0:
+		seed_inventory = loaded_seeds
+	else:
+		seed_inventory = {"wheat": 10, "carrot": 5, "strawberry": 2, "pumpkin": 0}
+	for cid in GameData.CROPS:
+		if not cid in seed_inventory:
+			seed_inventory[cid] = 0
+	
 	# Ensure Homestead tile 0 is always the Red Barn
 	var h_tiles = sector_tiles.get("1,1", [])
 	if h_tiles.size() > 0:
@@ -359,6 +380,27 @@ func load_game():
 	
 	# Calculate offline crop growth
 	update_crop_timers()
+
+# Seed Inventory Helpers
+func get_seed_count(crop_id: String) -> int:
+	return int(seed_inventory.get(crop_id, 0))
+
+func buy_seeds(crop_id: String, amount: int = 1) -> bool:
+	if not crop_id in GameData.CROPS:
+		return false
+	var c = GameData.CROPS[crop_id]
+	var unit_cost = c.get("cost", 10)
+	var total_cost = unit_cost * amount
+	if coins >= total_cost:
+		coins -= total_cost
+		seed_inventory[crop_id] = get_seed_count(crop_id) + amount
+		save_game()
+		state_updated.emit()
+		message_broadcast.emit("Bought %dx %s Seeds for %dc!" % [amount, c.get("name", "Crop"), total_cost], true)
+		return true
+	else:
+		message_broadcast.emit("Need %dc to buy %dx %s Seeds!" % [total_cost, amount, c.get("name", "Crop")], false)
+		return false
 
 # Barn Inventory Management (10 slots, stack of 10 max)
 func add_to_barn(item_id: String, amount: int = 1) -> bool:

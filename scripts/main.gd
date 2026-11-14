@@ -48,9 +48,10 @@ var tex_dock_seed = preload("res://assets/ui/dock_icon_seed.png")
 var tex_dock_tools = preload("res://assets/ui/dock_icon_tools.png")
 var tex_dock_market = preload("res://assets/ui/dock_icon_market.png")
 
-# Seed Drawer & Market Modal
-var seed_drawer: PanelContainer
-var seed_drawer_grid: GridContainer
+# Seed Pouch Modal & Market Modal
+var seed_modal: Control
+var seed_modal_items_vbox: VBoxContainer
+var seed_modal_balance_label: Label
 
 var market_modal: Control
 var market_items_vbox: VBoxContainer
@@ -133,7 +134,7 @@ var total_drag_dist: float = 0.0
 func _ready():
 	_build_isometric_grid()
 	_setup_gardener_dock()
-	_build_seed_drawer()
+	_build_seed_modal()
 	_build_market_modal()
 	_build_barn_modal()
 	_setup_map_buttons()
@@ -398,7 +399,7 @@ func _setup_gardener_dock():
 	dock_active_seed_btn.add_theme_stylebox_override("normal", active_gold)
 	dock_active_seed_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_active_seed_btn.add_theme_stylebox_override("pressed", hover_wood)
-	dock_active_seed_btn.pressed.connect(_toggle_seed_drawer)
+	dock_active_seed_btn.pressed.connect(_open_seed_modal)
 	var s_parts = build_dock_button_content.call(dock_active_seed_btn, tex_dock_seed)
 	dock_seed_icon = s_parts["icon"]
 	dock_seed_title = s_parts["title"]
@@ -445,10 +446,11 @@ func _setup_gardener_dock():
 func _select_crop(crop_id: String):
 	GameState.selected_crop = crop_id
 	var c = GameData.CROPS[crop_id]
-	_show_message("Equipped %s seeds (Cost: %dc)" % [c["name"], c["cost"]], false)
+	var count = GameState.get_seed_count(crop_id)
+	_show_message("Equipped %s seeds (%d ready in pouch)" % [c["name"], count], false)
 	_refresh_gardener_dock()
-	if seed_drawer:
-		seed_drawer.visible = false
+	if seed_modal and seed_modal.visible:
+		_refresh_seed_modal()
 
 func _setup_map_buttons():
 	for child in map_grid.get_children():
@@ -472,8 +474,15 @@ func _refresh_gardener_dock():
 		
 	if dock_seed_title and dock_seed_sub:
 		var c = GameData.CROPS.get(GameState.selected_crop, {})
+		var count = GameState.get_seed_count(GameState.selected_crop)
 		dock_seed_title.text = "Seed: %s" % c.get("name", "Wheat")
-		dock_seed_sub.text = "%dc • [v] Pouch" % c.get("cost", 10)
+		if count > 0:
+			dock_seed_sub.text = "%d in Pouch • [Change]" % count
+			dock_seed_sub.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.95))
+		else:
+			dock_seed_sub.text = "0 in Pouch • [Buy Seeds]"
+			dock_seed_sub.add_theme_color_override("font_color", Color(1.0, 0.50, 0.40, 1.0))
+			
 		var item_info = GameData.get_item_info(GameState.selected_crop)
 		if dock_seed_icon:
 			if item_info.get("icon", "") != "":
@@ -537,6 +546,9 @@ func _refresh_ui():
 		
 	_refresh_gardener_dock()
 	
+	if seed_modal and seed_modal.visible:
+		_refresh_seed_modal()
+		
 	if market_modal and market_modal.visible:
 		_refresh_market_modal()
 	
@@ -954,6 +966,10 @@ func _build_barn_modal():
 	frame.add_child(barn_detail_label)
 
 func _open_barn_modal():
+	if seed_modal:
+		seed_modal.visible = false
+	if market_modal:
+		market_modal.visible = false
 	barn_modal.visible = true
 	_refresh_barn_modal()
 
@@ -999,111 +1015,230 @@ func _on_barn_slot_clicked(slot_idx: int):
 	else:
 		barn_detail_label.text = "Empty Storage Slot (%d of 10) • Harvested crops are stored here automatically!" % (slot_idx + 1)
 
-# Seed Pouch Drawer (Scalable seed selection popup)
-func _build_seed_drawer():
-	seed_drawer = PanelContainer.new()
-	seed_drawer.name = "SeedDrawer"
-	seed_drawer.visible = false
+# Seed Pouch & Nursery Merchant Modal
+func _build_seed_modal():
+	seed_modal = Control.new()
+	seed_modal.name = "SeedModal"
+	seed_modal.anchors_preset = Control.PRESET_FULL_RECT
+	seed_modal.visible = false
+	$HUD.add_child(seed_modal)
 	
-	var sb = StyleBoxFlat.new()
-	sb.bg_color = Color(0.16, 0.10, 0.06, 0.96)
-	sb.set_border_width_all(2)
-	sb.border_color = Color(1.0, 0.82, 0.35, 0.9)
-	sb.set_corner_radius_all(12)
-	sb.content_margin_left = 18
-	sb.content_margin_right = 18
-	sb.content_margin_top = 12
-	sb.content_margin_bottom = 12
-	seed_drawer.add_theme_stylebox_override("panel", sb)
+	# Dimmed dark overlay
+	var overlay = ColorRect.new()
+	overlay.anchors_preset = Control.PRESET_FULL_RECT
+	overlay.color = Color(0, 0, 0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if event is InputEventMouseButton and event.pressed:
+			seed_modal.visible = false
+	)
+	seed_modal.add_child(overlay)
 	
-	seed_drawer.anchors_preset = Control.PRESET_BOTTOM_WIDE
-	seed_drawer.offset_top = -220
-	seed_drawer.offset_bottom = -76
-	seed_drawer.offset_left = 180
-	seed_drawer.offset_right = -180
-	$HUD.add_child(seed_drawer)
+	var center = CenterContainer.new()
+	center.anchors_preset = Control.PRESET_FULL_RECT
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	seed_modal.add_child(center)
+	
+	# Seed Merchant Card Panel
+	var panel = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(760, 520)
+	var psb = StyleBoxFlat.new()
+	psb.bg_color = Color(0.18, 0.12, 0.08, 0.98)
+	psb.set_border_width_all(3)
+	psb.border_color = Color(0.95, 0.80, 0.35, 1.0)
+	psb.set_corner_radius_all(14)
+	psb.content_margin_left = 22
+	psb.content_margin_right = 22
+	psb.content_margin_top = 18
+	psb.content_margin_bottom = 18
+	panel.add_theme_stylebox_override("panel", psb)
+	center.add_child(panel)
 	
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
-	seed_drawer.add_child(vbox)
+	vbox.add_theme_constant_override("separation", 10)
+	panel.add_child(vbox)
 	
-	var header = Label.new()
-	header.text = "SEED POUCH • SELECT ACTIVE SEED"
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.add_theme_font_size_override("font_size", 14)
-	header.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
-	vbox.add_child(header)
+	# Top bar: Title & Close
+	var top_h = HBoxContainer.new()
+	vbox.add_child(top_h)
 	
-	seed_drawer_grid = GridContainer.new()
-	seed_drawer_grid.columns = 4
-	seed_drawer_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	seed_drawer_grid.add_theme_constant_override("h_separation", 12)
-	seed_drawer_grid.add_theme_constant_override("v_separation", 8)
-	vbox.add_child(seed_drawer_grid)
+	var title = Label.new()
+	title.text = "SEED POUCH & NURSERY MERCHANT"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55, 1.0))
+	top_h.add_child(title)
 	
+	var close_btn = Button.new()
+	close_btn.text = " [X] Close "
+	close_btn.pressed.connect(func(): seed_modal.visible = false)
+	top_h.add_child(close_btn)
+	
+	# Subtitle / Coins info
+	var sub_h = HBoxContainer.new()
+	vbox.add_child(sub_h)
+	
+	var sub = Label.new()
+	sub.text = "Equip seeds for planting, or buy new seed packets with gold coins."
+	sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
+	sub_h.add_child(sub)
+	
+	seed_modal_balance_label = Label.new()
+	seed_modal_balance_label.text = "Your Coins: %dc" % GameState.coins
+	seed_modal_balance_label.add_theme_font_size_override("font_size", 15)
+	seed_modal_balance_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.35, 1.0))
+	sub_h.add_child(seed_modal_balance_label)
+	
+	# Scrollable container for seed cards
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(0, 360)
+	vbox.add_child(scroll)
+	
+	seed_modal_items_vbox = VBoxContainer.new()
+	seed_modal_items_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_modal_items_vbox.add_theme_constant_override("separation", 10)
+	scroll.add_child(seed_modal_items_vbox)
+
+func _open_seed_modal():
+	if market_modal:
+		market_modal.visible = false
+	if barn_modal:
+		barn_modal.visible = false
+	seed_modal.visible = true
+	_refresh_seed_modal()
+
+func _refresh_seed_modal():
+	if not seed_modal or not seed_modal_items_vbox:
+		return
+		
+	seed_modal_balance_label.text = "Your Coins: %dc" % GameState.coins
+	
+	for child in seed_modal_items_vbox.get_children():
+		child.queue_free()
+		
 	for crop_id in GameData.CROPS:
 		var c = GameData.CROPS[crop_id]
 		var item_info = GameData.get_item_info(crop_id)
+		var seed_count = GameState.get_seed_count(crop_id)
+		var is_equipped = (GameState.selected_crop == crop_id)
 		
-		var card = Button.new()
-		card.custom_minimum_size = Vector2(130, 72)
-		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var row = PanelContainer.new()
+		var r_sb = StyleBoxFlat.new()
+		if is_equipped:
+			r_sb.bg_color = Color(0.28, 0.20, 0.10, 0.95)
+			r_sb.set_border_width_all(2)
+			r_sb.border_color = Color(1.0, 0.85, 0.30, 1.0)
+		else:
+			r_sb.bg_color = Color(0.22, 0.14, 0.08, 0.92)
+			r_sb.set_border_width_all(1)
+			r_sb.border_color = Color(0.50, 0.38, 0.22, 0.7)
+		r_sb.set_corner_radius_all(10)
+		r_sb.content_margin_left = 14
+		r_sb.content_margin_right = 14
+		r_sb.content_margin_top = 8
+		r_sb.content_margin_bottom = 8
+		row.add_theme_stylebox_override("panel", r_sb)
 		
-		var card_sb = StyleBoxFlat.new()
-		card_sb.bg_color = Color(0.22, 0.15, 0.09, 0.92)
-		card_sb.set_border_width_all(2)
-		card_sb.border_color = Color(0.55, 0.42, 0.25, 0.7)
-		card_sb.set_corner_radius_all(8)
-		card.add_theme_stylebox_override("normal", card_sb)
+		var rh = HBoxContainer.new()
+		rh.add_theme_constant_override("separation", 14)
+		row.add_child(rh)
 		
-		var card_h = card_sb.duplicate()
-		card_h.border_color = Color(1.0, 0.85, 0.35, 1.0)
-		card_h.bg_color = Color(0.30, 0.20, 0.12, 0.98)
-		card.add_theme_stylebox_override("hover", card_h)
-		card.add_theme_stylebox_override("pressed", card_h)
-		
-		var inner = HBoxContainer.new()
-		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		inner.anchors_preset = Control.PRESET_FULL_RECT
-		inner.offset_left = 6
-		inner.offset_right = -6
-		inner.offset_top = 4
-		inner.offset_bottom = -4
-		card.add_child(inner)
-		
+		# 1. Crop Icon
 		var ic = TextureRect.new()
+		ic.custom_minimum_size = Vector2(48, 48)
 		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		ic.custom_minimum_size = Vector2(44, 44)
-		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		if item_info.get("icon", "") != "":
 			ic.texture = load(item_info["icon"])
-		inner.add_child(ic)
+		rh.add_child(ic)
 		
-		var d_vbox = VBoxContainer.new()
-		d_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		d_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-		inner.add_child(d_vbox)
+		# 2. Crop Details VBox
+		var info_v = VBoxContainer.new()
+		info_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		info_v.alignment = BoxContainer.ALIGNMENT_CENTER
+		info_v.add_theme_constant_override("separation", 2)
+		rh.add_child(info_v)
+		
+		var title_h = HBoxContainer.new()
+		title_h.add_theme_constant_override("separation", 8)
+		info_v.add_child(title_h)
 		
 		var name_lbl = Label.new()
 		name_lbl.text = c["name"]
-		name_lbl.add_theme_font_size_override("font_size", 13)
-		name_lbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85, 1.0))
-		d_vbox.add_child(name_lbl)
+		name_lbl.add_theme_font_size_override("font_size", 15)
+		name_lbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.82, 1.0))
+		title_h.add_child(name_lbl)
 		
-		var cost_lbl = Label.new()
-		cost_lbl.text = "%dc • %ds" % [c["cost"], int(c["grow_time"])]
-		cost_lbl.add_theme_font_size_override("font_size", 11)
-		cost_lbl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.25, 0.95))
-		d_vbox.add_child(cost_lbl)
+		if is_equipped:
+			var eq_tag = Label.new()
+			eq_tag.text = "[EQUIPPED]"
+			eq_tag.add_theme_font_size_override("font_size", 12)
+			eq_tag.add_theme_color_override("font_color", Color(1.0, 0.85, 0.25, 1.0))
+			title_h.add_child(eq_tag)
+			
+		var stats_lbl = Label.new()
+		stats_lbl.text = "Grow: %ds • Harvest: +%dc • Unit Cost: %dc" % [int(c["grow_time"]), c["reward"], c["cost"]]
+		stats_lbl.add_theme_font_size_override("font_size", 12)
+		stats_lbl.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.9))
+		info_v.add_child(stats_lbl)
 		
-		var target_id = crop_id
-		card.pressed.connect(func(): _select_crop(target_id))
-		seed_drawer_grid.add_child(card)
-
-func _toggle_seed_drawer():
-	if seed_drawer:
-		seed_drawer.visible = not seed_drawer.visible
+		var stock_lbl = Label.new()
+		if seed_count > 0:
+			stock_lbl.text = "In Pouch: %d seeds ready to plant" % seed_count
+			stock_lbl.add_theme_color_override("font_color", Color(0.70, 0.95, 0.60, 1.0))
+		else:
+			stock_lbl.text = "Out of seeds! (Buy packets to the right)"
+			stock_lbl.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45, 1.0))
+		stock_lbl.add_theme_font_size_override("font_size", 12)
+		info_v.add_child(stock_lbl)
+		
+		# 3. Actions HBox (Equip, Buy 1, Buy 5)
+		var acts_h = HBoxContainer.new()
+		acts_h.alignment = BoxContainer.ALIGNMENT_CENTER
+		acts_h.add_theme_constant_override("separation", 8)
+		rh.add_child(acts_h)
+		
+		# Equip Button
+		var eq_btn = Button.new()
+		eq_btn.custom_minimum_size = Vector2(96, 38)
+		if is_equipped:
+			eq_btn.text = "Equipped"
+			eq_btn.disabled = true
+		else:
+			eq_btn.text = "Equip Seed"
+			var cid_equip = crop_id
+			eq_btn.pressed.connect(func():
+				_select_crop(cid_equip)
+				_refresh_seed_modal()
+			)
+		acts_h.add_child(eq_btn)
+		
+		# Buy 1x Button
+		var buy1_btn = Button.new()
+		buy1_btn.custom_minimum_size = Vector2(90, 38)
+		buy1_btn.text = "+1 (%dc)" % c["cost"]
+		var cid_b1 = crop_id
+		buy1_btn.pressed.connect(func():
+			GameState.buy_seeds(cid_b1, 1)
+			_refresh_seed_modal()
+		)
+		acts_h.add_child(buy1_btn)
+		
+		# Buy 5x Button
+		var buy5_btn = Button.new()
+		buy5_btn.custom_minimum_size = Vector2(96, 38)
+		buy5_btn.text = "+5 (%dc)" % (c["cost"] * 5)
+		var cid_b5 = crop_id
+		buy5_btn.pressed.connect(func():
+			GameState.buy_seeds(cid_b5, 5)
+			_refresh_seed_modal()
+		)
+		acts_h.add_child(buy5_btn)
+		
+		seed_modal_items_vbox.add_child(row)
 
 # Town Market & Farm Stand Modal (Selling crops from the Barn)
 func _build_market_modal():
@@ -1158,6 +1293,11 @@ func _build_market_modal():
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.60, 1.0))
 	top_h.add_child(title)
+	
+	var buy_seeds_btn = Button.new()
+	buy_seeds_btn.text = " Buy Seeds... "
+	buy_seeds_btn.pressed.connect(func(): _open_seed_modal())
+	top_h.add_child(buy_seeds_btn)
 	
 	var close_btn = Button.new()
 	close_btn.text = " [X] Close "
@@ -1229,8 +1369,10 @@ func _build_market_modal():
 	bottom_h.add_child(sell_all_btn)
 
 func _open_market_modal():
-	if seed_drawer:
-		seed_drawer.visible = false
+	if seed_modal:
+		seed_modal.visible = false
+	if barn_modal:
+		barn_modal.visible = false
 	market_modal.visible = true
 	_refresh_market_modal()
 
