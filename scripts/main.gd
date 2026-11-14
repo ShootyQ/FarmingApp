@@ -150,7 +150,7 @@ var zoom_reset_btn: Button
 func _ready():
 	mobile_ui = OS.has_feature("mobile") or "--mobile-ui" in OS.get_cmdline_user_args()
 	if OS.has_feature("web"):
-		mobile_ui = JavaScriptBridge.eval("matchMedia('(pointer: coarse)').matches || innerWidth < 700") == true
+		mobile_ui = bool(JavaScriptBridge.eval("window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 700", true))
 	if mobile_ui:
 		_apply_mobile_scale()
 		get_window().size_changed.connect(_apply_mobile_scale)
