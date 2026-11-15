@@ -372,7 +372,7 @@ func _on_farm_replaced():
 	_refresh_ui()
 
 func _farm_modal_open() -> bool:
-	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible)
+	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible) or (workshop_modal and workshop_modal.visible)
 
 func _input(event: InputEvent):
 	# Finish tracked touches even when released over a HUD button.
@@ -877,7 +877,7 @@ func _on_plot_clicked(idx: int):
 	_render_plot(idx)
 
 func _close_farm_menus():
-	for modal in [map_modal, seed_modal, market_modal, barn_modal, tool_menu]:
+	for modal in [map_modal, seed_modal, market_modal, barn_modal, workshop_modal, tool_menu]:
 		if modal:
 			modal.visible = false
 	is_dragging = false
@@ -2040,11 +2040,12 @@ func _build_workshop_modal():
 	frame.grow_vertical = Control.GROW_DIRECTION_BOTH
 	frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	frame.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	frame.mouse_filter = Control.MOUSE_FILTER_PASS
 	workshop_modal.add_child(frame)
 	
 	# Translucent warm wood backing panel for optimal recipe legibility
 	var backing = Panel.new()
+	backing.mouse_filter = Control.MOUSE_FILTER_PASS
 	backing.position = Vector2(40, 24)
 	backing.size = Vector2(880, 572)
 	var backing_sb = StyleBoxFlat.new()
