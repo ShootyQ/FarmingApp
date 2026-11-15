@@ -115,6 +115,22 @@ var barn_title_label: Label
 var barn_detail_label: Label
 var barn_btn: Button
 
+# Carpenter's Workshop & Crafting
+var tex_workshop = preload("res://assets/objects/workshop.png")
+var tex_workshop_interior = preload("res://assets/ui/workshop_interior.jpg")
+var workshop_modal: Control
+var workshop_cards_container: VBoxContainer
+var workshop_filter_category: String = "All"
+var workshop_balance_label: Label
+var workshop_btn: Button
+
+# Building Placement Mode (2x2 Grid Footprints)
+var is_placing_building: bool = false
+var placing_building_id: String = ""
+var placement_ghost_node: Node2D = null
+var placement_hud_banner: PanelContainer = null
+var placement_status_label: Label = null
+
 # Obstacle Variations: Weeds (4), Logs (2), Rocks (3)
 var tex_weeds = [
 	preload("res://assets/objects/weed_0.png"), # Thistle
@@ -172,6 +188,7 @@ func _ready():
 	_build_seed_modal()
 	_build_market_modal()
 	_build_barn_modal()
+	_build_workshop_modal()
 	_setup_map_buttons()
 	tool_menu = preload("res://scripts/tool_menu.gd").new()
 	$HUD.add_child(tool_menu)
@@ -189,6 +206,9 @@ func _ready():
 	GameState.barn_opened.connect(_open_barn_modal)
 	GameState.barn_updated.connect(_refresh_barn_modal)
 	GameState.barn_updated.connect(_refresh_market_modal)
+	GameState.workshop_opened.connect(_open_workshop_modal)
+	GameState.workshop_unlocked_signal.connect(_on_workshop_unlocked)
+	GameState.buildings_updated.connect(_refresh_ui)
 	
 	var make_wood_small_sb = func() -> StyleBoxFlat:
 		var sb = StyleBoxFlat.new()
@@ -215,6 +235,27 @@ func _ready():
 	barn_btn.add_theme_stylebox_override("normal", make_wood_small_sb.call())
 	barn_btn.pressed.connect(_open_barn_modal)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(barn_btn)
+	
+	workshop_btn = Button.new()
+	workshop_btn.text = "Workshop"
+	workshop_btn.add_theme_stylebox_override("normal", make_wood_small_sb.call())
+	workshop_btn.pressed.connect(_on_workshop_btn_pressed)
+	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(workshop_btn)
+	
+	var dev_unlock_btn = Button.new()
+	dev_unlock_btn.text = "+10m"
+	dev_unlock_btn.tooltip_text = "Dev: Instant 10-minute skip to unlock Workshop"
+	var dev_sb = StyleBoxFlat.new()
+	dev_sb.bg_color = Color(0.18, 0.14, 0.20, 0.85)
+	dev_sb.set_corner_radius_all(6)
+	dev_sb.content_margin_left = 6
+	dev_sb.content_margin_right = 6
+	dev_unlock_btn.add_theme_stylebox_override("normal", dev_sb)
+	dev_unlock_btn.pressed.connect(func():
+		GameState.unlock_workshop()
+		_refresh_ui()
+	)
+	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(dev_unlock_btn)
 	
 	if mobile_ui:
 		_setup_mobile_hud()
@@ -304,10 +345,18 @@ func _setup_mobile_hud():
 	frame.queue_free()
 
 func _process(delta: float):
+	if not GameState.workshop_unlocked:
+		GameState.play_time_seconds += delta
+		if GameState.play_time_seconds >= 600.0:
+			GameState.unlock_workshop()
+			
+	_update_workshop_button_text()
+	if is_placing_building:
+		_update_placement_ghost_pos()
+		
 	timer_elapsed += delta
-	if timer_elapsed < 1.0:
-		return
-	timer_elapsed = 0.0
+	if timer_elapsed >= 1.0:
+		timer_elapsed = 0.0
 	GameState.update_crop_timers()
 	_update_active_crop_labels()
 	if tool_menu and tool_menu.visible:
@@ -821,6 +870,9 @@ func _refresh_gardener_dock():
 		dock_tool_sub.text = "%s • %d/%d busy" % [GameData.TOOL_MATERIALS[GameState.tool_tier].capitalize(), GameState.get_preparation_count(), GameState.get_preparation_limit()]
 
 func _on_plot_clicked(idx: int):
+	if is_placing_building:
+		_handle_building_placement_click(idx)
+		return
 	GameState.interact_with_tile(GameState.current_sector_coord, idx)
 	_render_plot(idx)
 
@@ -890,15 +942,19 @@ func _refresh_ui():
 	sector_title.text = s_info.get("name", "Farm") if mobile_ui else "%s (%s)" % [s_info.get("name", "Farm"), GameState.current_sector_coord]
 	
 	if barn_btn:
-		barn_btn.text = "Barn (%d/10)" % GameState.get_barn_used_slots()
+		barn_btn.text = "Barn (%d/%d)" % [GameState.get_barn_used_slots(), GameState.barn_slots_max]
 		
 	_refresh_gardener_dock()
+	_update_workshop_button_text()
 	
 	if seed_modal and seed_modal.visible:
 		_refresh_seed_modal()
 		
 	if market_modal and market_modal.visible:
 		_refresh_market_modal()
+		
+	if workshop_modal and workshop_modal.visible:
+		_refresh_workshop_modal()
 	
 	# Tile signals refresh individual changes. Rerender the meadow only when its
 	# sector or tool requirements change, not all 400 tiles after every tap.
@@ -918,6 +974,8 @@ func _render_plot(idx: int):
 	var obj_sprite = node.get_node("ObjectSprite") as Sprite2D
 	var badge = node.get_node("Badge") as Label
 	soil_sprite.modulate = Color.WHITE
+	var gx = idx % 4
+	var gy = idx / 4
 	
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
 	if idx >= tiles.size():
@@ -930,14 +988,43 @@ func _render_plot(idx: int):
 	var type = tile.get("type", "grass")
 	
 	match type:
+		"building":
+			var b_id = tile.get("building_id", "barn")
+			var is_origin = tile.get("is_origin", false)
+			if is_origin:
+				soil_sprite.visible = false
+				obj_sprite.visible = true
+				if b_id == "workshop":
+					obj_sprite.texture = tex_workshop
+					obj_sprite.scale = Vector2(0.38, 0.38)
+					obj_sprite.offset = Vector2(0, -320)
+					obj_sprite.modulate = Color.WHITE
+					node.z_index = (gx + gy + 2) * 2
+					badge.position = Vector2(-75, -170)
+					badge.text = "Carpenter's Workshop"
+					badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
+				else: # barn
+					obj_sprite.texture = tex_barn
+					obj_sprite.scale = Vector2(1.15, 1.15)
+					obj_sprite.offset = Vector2(0, -104)
+					obj_sprite.modulate = Color.WHITE
+					node.z_index = (gx + gy + 2) * 2
+					badge.position = Vector2(-70, -165)
+					badge.text = "Red Barn [Storage]"
+					badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
+			else:
+				soil_sprite.visible = false
+				obj_sprite.visible = false
+				badge.text = ""
+		
 		"barn":
 			soil_sprite.visible = false
 			obj_sprite.visible = true
 			obj_sprite.texture = tex_barn
-			obj_sprite.scale = Vector2(0.90, 0.90)
-			obj_sprite.offset = Vector2(0, -96)
+			obj_sprite.scale = Vector2(1.15, 1.15)
+			obj_sprite.offset = Vector2(0, -104)
 			obj_sprite.modulate = Color.WHITE
-			badge.position = Vector2(-70, -145)
+			badge.position = Vector2(-70, -165)
 			badge.text = "Red Barn [Storage]"
 			badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
 		
@@ -1216,6 +1303,17 @@ func _build_barn_modal():
 	frame.mouse_filter = Control.MOUSE_FILTER_STOP
 	barn_modal.add_child(frame)
 	
+	# Move Barn button
+	var move_barn_btn = Button.new()
+	move_barn_btn.text = " Move Barn "
+	move_barn_btn.position = Vector2(610, 24)
+	move_barn_btn.custom_minimum_size = Vector2(110, 36)
+	move_barn_btn.pressed.connect(func():
+		barn_modal.visible = false
+		_start_placement_mode("barn")
+	)
+	frame.add_child(move_barn_btn)
+	
 	# Close button (top right)
 	var close_btn = Button.new()
 	close_btn.text = " [X] Close "
@@ -1342,9 +1440,66 @@ func _refresh_barn_modal():
 	if not barn_modal or not barn_slots_container:
 		return
 	var count = GameState.get_barn_used_slots()
-	barn_title_label.text = "RED BARN STORAGE (%d / 10 Slots)" % count
+	barn_title_label.text = "RED BARN STORAGE (%d / %d Slots)" % [count, GameState.barn_slots_max]
 	
-	for i in range(10):
+	# Dynamically support up to 15 slots if barn was expanded in workshop
+	while barn_slots_container.get_child_count() < GameState.barn_slots_max:
+		var slot_idx = barn_slots_container.get_child_count()
+		var slot_btn = Button.new()
+		slot_btn.custom_minimum_size = Vector2(96, 96)
+		slot_btn.name = "Slot_%d" % slot_idx
+		slot_btn.clip_contents = true
+		
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.16, 0.11, 0.07, 0.88)
+		sb.set_border_width_all(2)
+		sb.border_color = Color(0.65, 0.48, 0.22, 0.75)
+		sb.set_corner_radius_all(8)
+		slot_btn.add_theme_stylebox_override("normal", sb)
+		
+		var sb_h = sb.duplicate()
+		sb_h.border_color = Color(1.0, 0.85, 0.35, 1.0)
+		sb_h.bg_color = Color(0.24, 0.16, 0.10, 0.95)
+		slot_btn.add_theme_stylebox_override("hover", sb_h)
+		slot_btn.add_theme_stylebox_override("pressed", sb_h)
+		
+		var icon = TextureRect.new()
+		icon.name = "Icon"
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.size = Vector2(68, 68)
+		icon.position = Vector2(14, 14)
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_btn.add_child(icon)
+		
+		var name_lbl = Label.new()
+		name_lbl.name = "ItemName"
+		name_lbl.size = Vector2(96, 20)
+		name_lbl.position = Vector2(0, 4)
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_color_override("font_color", Color(0.95, 0.9, 0.75, 0.95))
+		name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_btn.add_child(name_lbl)
+		
+		var count_lbl = Label.new()
+		count_lbl.name = "CountBadge"
+		count_lbl.size = Vector2(90, 22)
+		count_lbl.position = Vector2(0, 70)
+		count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		count_lbl.add_theme_font_size_override("font_size", 13)
+		count_lbl.add_theme_color_override("font_color", Color(1.0, 0.88, 0.2, 1.0))
+		count_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 1.0))
+		count_lbl.add_theme_constant_override("shadow_offset_x", 1)
+		count_lbl.add_theme_constant_override("shadow_offset_y", 1)
+		count_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_btn.add_child(count_lbl)
+		
+		var s_idx = slot_idx
+		slot_btn.pressed.connect(func(): _on_barn_slot_clicked(s_idx))
+		barn_slots_container.add_child(slot_btn)
+	
+	for i in range(barn_slots_container.get_child_count()):
 		var btn = barn_slots_container.get_child(i) as Button
 		var icon = btn.get_node("Icon") as TextureRect
 		var name_lbl = btn.get_node("ItemName") as Label
@@ -1378,7 +1533,7 @@ func _on_barn_slot_clicked(slot_idx: int):
 			info["name"], item["count"], info["sell_value"], info["desc"]
 		]
 	else:
-		barn_detail_label.text = "Empty Storage Slot (%d of 10) • Harvested crops are stored here automatically!" % (slot_idx + 1)
+		barn_detail_label.text = "Empty Storage Slot (%d of %d) • Harvested crops are stored here automatically!" % [slot_idx + 1, GameState.barn_slots_max]
 
 # Seed Pouch & Nursery Merchant Modal
 func _build_seed_modal():
@@ -1845,3 +2000,452 @@ func _refresh_market_modal():
 func _on_market_sell_all_pressed():
 	GameState.sell_all_from_barn()
 	_refresh_market_modal()
+
+# ==============================================================================
+# Carpenter's Workshop & Crafting Modal System
+# ==============================================================================
+
+func _build_workshop_modal():
+	workshop_modal = Control.new()
+	workshop_modal.name = "WorkshopModal"
+	workshop_modal.visible = false
+	$HUD.add_child(workshop_modal)
+	workshop_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	# Dimmed dark overlay
+	var overlay = ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if event is InputEventMouseButton and event.pressed:
+			workshop_modal.visible = false
+	)
+	workshop_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	# Workshop Interior Frame
+	var frame = TextureRect.new()
+	frame.texture = tex_workshop_interior
+	frame.custom_minimum_size = Vector2(960, 620)
+	frame.anchor_left = 0.5
+	frame.anchor_right = 0.5
+	frame.anchor_top = 0.5
+	frame.anchor_bottom = 0.5
+	frame.offset_left = -480.0
+	frame.offset_right = 480.0
+	frame.offset_top = -310.0
+	frame.offset_bottom = 310.0
+	frame.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	frame.grow_vertical = Control.GROW_DIRECTION_BOTH
+	frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	frame.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	workshop_modal.add_child(frame)
+	
+	# Translucent warm wood backing panel for optimal recipe legibility
+	var backing = Panel.new()
+	backing.position = Vector2(40, 24)
+	backing.size = Vector2(880, 572)
+	var backing_sb = StyleBoxFlat.new()
+	backing_sb.bg_color = Color(0.12, 0.08, 0.05, 0.90)
+	backing_sb.set_border_width_all(2)
+	backing_sb.border_color = Color(0.70, 0.55, 0.35, 0.95)
+	backing_sb.set_corner_radius_all(10)
+	backing.add_theme_stylebox_override("panel", backing_sb)
+	frame.add_child(backing)
+	
+	# Top bar
+	var top_hbox = HBoxContainer.new()
+	top_hbox.position = Vector2(24, 16)
+	top_hbox.size = Vector2(832, 40)
+	backing.add_child(top_hbox)
+	
+	var title_lbl = Label.new()
+	title_lbl.text = "CARPENTER'S WORKSHOP & FORGE"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+	title_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 1.0))
+	title_lbl.add_theme_constant_override("shadow_offset_x", 2)
+	title_lbl.add_theme_constant_override("shadow_offset_y", 2)
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_hbox.add_child(title_lbl)
+	
+	var move_btn = Button.new()
+	move_btn.text = " Move Workshop "
+	move_btn.custom_minimum_size = Vector2(130, 34)
+	move_btn.pressed.connect(func():
+		workshop_modal.visible = false
+		_start_placement_mode("workshop")
+	)
+	top_hbox.add_child(move_btn)
+	
+	var close_btn = Button.new()
+	close_btn.text = " [X] Close "
+	close_btn.custom_minimum_size = Vector2(90, 34)
+	close_btn.pressed.connect(func(): workshop_modal.visible = false)
+	top_hbox.add_child(close_btn)
+	
+	# Subtitle & Resources row
+	var sub_hbox = HBoxContainer.new()
+	sub_hbox.position = Vector2(24, 60)
+	sub_hbox.size = Vector2(832, 26)
+	backing.add_child(sub_hbox)
+	
+	var hint_lbl = Label.new()
+	hint_lbl.text = "Craft fences, wells, decorations, and barn expansions from wood and stone."
+	hint_lbl.add_theme_font_size_override("font_size", 13)
+	hint_lbl.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
+	hint_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sub_hbox.add_child(hint_lbl)
+	
+	workshop_balance_label = Label.new()
+	workshop_balance_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	workshop_balance_label.add_theme_font_size_override("font_size", 13)
+	workshop_balance_label.add_theme_color_override("font_color", Color(1.0, 0.90, 0.40, 1.0))
+	sub_hbox.add_child(workshop_balance_label)
+	
+	# Category Tabs
+	var tabs_hbox = HBoxContainer.new()
+	tabs_hbox.position = Vector2(24, 94)
+	tabs_hbox.size = Vector2(832, 34)
+	tabs_hbox.add_theme_constant_override("separation", 10)
+	backing.add_child(tabs_hbox)
+	
+	var categories = ["All", "Decor", "Farmstead", "Refining"]
+	for cat in categories:
+		var tab_btn = Button.new()
+		tab_btn.text = " %s " % cat
+		tab_btn.name = "Tab_" + cat
+		tab_btn.custom_minimum_size = Vector2(100, 32)
+		var c_name = cat
+		tab_btn.pressed.connect(func():
+			workshop_filter_category = c_name
+			_refresh_workshop_modal()
+		)
+		tabs_hbox.add_child(tab_btn)
+	
+	# ScrollContainer with Recipe Cards
+	var scroll = ScrollContainer.new()
+	scroll.position = Vector2(24, 136)
+	scroll.size = Vector2(832, 412)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	backing.add_child(scroll)
+	
+	workshop_cards_container = VBoxContainer.new()
+	workshop_cards_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	workshop_cards_container.add_theme_constant_override("separation", 8)
+	scroll.add_child(workshop_cards_container)
+
+func _open_workshop_modal():
+	if not GameState.workshop_unlocked:
+		var remain = max(0, 600 - int(GameState.play_time_seconds))
+		_show_message("Carpenter's Workshop unlocks after 10m of gameplay (%dm %ds left)!" % [remain / 60, remain % 60], false)
+		return
+	if not GameState.buildings["workshop"].get("placed", false):
+		_start_placement_mode("workshop")
+		return
+	if seed_modal:
+		seed_modal.visible = false
+	if market_modal:
+		market_modal.visible = false
+	if barn_modal:
+		barn_modal.visible = false
+	workshop_modal.visible = true
+	_refresh_workshop_modal()
+
+func _refresh_workshop_modal():
+	if not workshop_modal or not workshop_cards_container:
+		return
+		
+	workshop_balance_label.text = "Coins: %s | Wood: %s | Stone: %s | Relics: %s" % [
+		_format_number(GameState.coins),
+		_format_number(GameState.wood),
+		_format_number(GameState.stone),
+		_format_number(GameState.relics)
+	]
+	
+	for child in workshop_cards_container.get_children():
+		child.queue_free()
+		
+	for r_id in GameData.CRAFTING_RECIPES:
+		var r = GameData.CRAFTING_RECIPES[r_id]
+		if workshop_filter_category != "All" and r.get("category", "") != workshop_filter_category:
+			continue
+			
+		var card = PanelContainer.new()
+		var csb = StyleBoxFlat.new()
+		csb.bg_color = Color(0.20, 0.14, 0.09, 0.92)
+		csb.set_border_width_all(1)
+		csb.border_color = Color(0.60, 0.48, 0.30, 0.70)
+		csb.set_corner_radius_all(8)
+		csb.content_margin_left = 12
+		csb.content_margin_right = 12
+		csb.content_margin_top = 8
+		csb.content_margin_bottom = 8
+		card.add_theme_stylebox_override("panel", csb)
+		
+		var h = HBoxContainer.new()
+		h.add_theme_constant_override("separation", 14)
+		card.add_child(h)
+		
+		# Item Icon
+		var ic = TextureRect.new()
+		ic.custom_minimum_size = Vector2(48, 48)
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		var item_info = GameData.get_item_info(r.get("yield_item", r_id))
+		if item_info.get("icon", "") != "":
+			ic.texture = load(item_info["icon"])
+		elif r_id == "wooden_fence":
+			ic.texture = tex_res_wood
+		elif r_id == "stone_well":
+			ic.texture = tex_res_stone
+		elif r_id == "barn_expansion_1":
+			ic.texture = tex_dock_barn
+		else:
+			ic.texture = tex_res_wood
+		h.add_child(ic)
+		
+		# Recipe Info (Name, category, desc, cost)
+		var v = VBoxContainer.new()
+		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(v)
+		
+		var title_h = HBoxContainer.new()
+		v.add_child(title_h)
+		
+		var nl = Label.new()
+		nl.text = r["name"]
+		nl.add_theme_font_size_override("font_size", 15)
+		nl.add_theme_color_override("font_color", Color(1.0, 0.94, 0.80, 1.0))
+		title_h.add_child(nl)
+		
+		var cat_lbl = Label.new()
+		cat_lbl.text = " [%s] " % r.get("category", "General")
+		cat_lbl.add_theme_font_size_override("font_size", 11)
+		cat_lbl.add_theme_color_override("font_color", Color(0.75, 0.85, 0.65, 0.9))
+		title_h.add_child(cat_lbl)
+		
+		var dl = Label.new()
+		dl.text = r.get("desc", "")
+		dl.add_theme_font_size_override("font_size", 12)
+		dl.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
+		v.add_child(dl)
+		
+		# Cost string with color status
+		var cost_strs = []
+		var cost = r.get("cost", {})
+		for k in cost:
+			var req = cost[k]
+			var have = 0
+			if k == "coins": have = GameState.coins
+			elif k == "wood": have = GameState.wood
+			elif k == "stone": have = GameState.stone
+			elif k == "relics": have = GameState.relics
+			else: have = GameState.get_barn_item_count(k)
+			cost_strs.append("%s: %d/%d" % [k.capitalize(), have, req])
+		
+		var cl = Label.new()
+		cl.text = "Cost: " + "  •  ".join(cost_strs)
+		cl.add_theme_font_size_override("font_size", 12)
+		var can_craft = GameState.can_craft_recipe(r_id)
+		cl.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6, 1.0) if can_craft else Color(1.0, 0.6, 0.5, 0.9))
+		v.add_child(cl)
+		
+		# Action Button
+		var is_unique = r.get("is_unique", false)
+		var already_crafted = is_unique and GameState.crafted_recipes.get(r_id, 0) > 0
+		
+		if already_crafted:
+			var built_lbl = Label.new()
+			built_lbl.text = "[ Built / Active ]"
+			built_lbl.add_theme_font_size_override("font_size", 13)
+			built_lbl.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5, 0.9))
+			h.add_child(built_lbl)
+		else:
+			var craft_btn = Button.new()
+			var y_count = r.get("yield_count", 1)
+			craft_btn.text = " Craft " if y_count == 1 else " Craft (x%d) " % y_count
+			craft_btn.disabled = not can_craft
+			var rec_id = r_id
+			craft_btn.pressed.connect(func():
+				GameState.craft_recipe(rec_id)
+				_refresh_workshop_modal()
+			)
+			h.add_child(craft_btn)
+		
+		workshop_cards_container.add_child(card)
+
+func _on_workshop_unlocked():
+	_show_message("Carpenter's Workshop Unlocked! Ready to place on your farm!", true)
+	_refresh_ui()
+
+func _on_workshop_btn_pressed():
+	if not GameState.workshop_unlocked:
+		var remain = max(0, 600 - int(GameState.play_time_seconds))
+		_show_message("Workshop unlocks after 10m of gameplay (%dm %ds left) or tap [+10m]!" % [remain / 60, remain % 60], false)
+	elif not GameState.buildings["workshop"].get("placed", false):
+		_start_placement_mode("workshop")
+	else:
+		_open_workshop_modal()
+
+func _update_workshop_button_text():
+	if not workshop_btn:
+		return
+	if not GameState.workshop_unlocked:
+		var remain = max(0, 600 - int(GameState.play_time_seconds))
+		workshop_btn.text = "Workshop (%dm %ds)" % [remain / 60, remain % 60]
+	elif not GameState.buildings["workshop"].get("placed", false):
+		workshop_btn.text = "Place Workshop!"
+	else:
+		workshop_btn.text = "Workshop"
+
+# ==============================================================================
+# Building Placement System (2x2 Grid Footprints)
+# ==============================================================================
+
+func _start_placement_mode(building_id: String):
+	is_placing_building = true
+	placing_building_id = building_id
+	if workshop_modal:
+		workshop_modal.visible = false
+	if barn_modal:
+		barn_modal.visible = false
+	if seed_modal:
+		seed_modal.visible = false
+	if market_modal:
+		market_modal.visible = false
+		
+	if placement_ghost_node == null:
+		placement_ghost_node = Node2D.new()
+		placement_ghost_node.name = "PlacementGhost"
+		placement_ghost_node.z_index = 25
+		
+		var spr = Sprite2D.new()
+		spr.name = "GhostSprite"
+		placement_ghost_node.add_child(spr)
+		
+		var badge = Label.new()
+		badge.name = "GhostBadge"
+		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		badge.position = Vector2(-120, -180)
+		badge.custom_minimum_size = Vector2(240, 30)
+		badge.add_theme_font_size_override("font_size", 14)
+		badge.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
+		badge.add_theme_constant_override("shadow_offset_x", 1)
+		badge.add_theme_constant_override("shadow_offset_y", 1)
+		placement_ghost_node.add_child(badge)
+		
+		plots_root.add_child(placement_ghost_node)
+	
+	var spr = placement_ghost_node.get_node("GhostSprite") as Sprite2D
+	if building_id == "workshop":
+		spr.texture = tex_workshop
+		spr.scale = Vector2(0.38, 0.38)
+		spr.offset = Vector2(0, -320)
+	elif building_id == "barn":
+		spr.texture = tex_barn
+		spr.scale = Vector2(1.15, 1.15)
+		spr.offset = Vector2(0, -104)
+	
+	placement_ghost_node.visible = true
+	_show_placement_banner()
+	_update_placement_ghost_pos()
+
+func _stop_placement_mode():
+	is_placing_building = false
+	placing_building_id = ""
+	if placement_ghost_node:
+		placement_ghost_node.visible = false
+	if placement_hud_banner:
+		placement_hud_banner.visible = false
+	_refresh_ui()
+
+func _show_placement_banner():
+	if placement_hud_banner == null:
+		placement_hud_banner = PanelContainer.new()
+		placement_hud_banner.name = "PlacementHUD"
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.12, 0.08, 0.04, 0.94)
+		sb.set_border_width_all(2)
+		sb.border_color = Color(0.85, 0.70, 0.35, 1.0)
+		sb.set_corner_radius_all(10)
+		sb.content_margin_left = 18
+		sb.content_margin_right = 18
+		sb.content_margin_top = 8
+		sb.content_margin_bottom = 8
+		placement_hud_banner.add_theme_stylebox_override("panel", sb)
+		
+		var hbox = HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 16)
+		placement_hud_banner.add_child(hbox)
+		
+		placement_status_label = Label.new()
+		placement_status_label.text = "Select a clear 2x2 grass area to place building"
+		placement_status_label.add_theme_font_size_override("font_size", 14)
+		placement_status_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+		hbox.add_child(placement_status_label)
+		
+		var cancel_btn = Button.new()
+		cancel_btn.text = " Cancel Placement "
+		cancel_btn.pressed.connect(_stop_placement_mode)
+		hbox.add_child(cancel_btn)
+		
+		$HUD.add_child(placement_hud_banner)
+		placement_hud_banner.anchor_left = 0.5
+		placement_hud_banner.anchor_right = 0.5
+		placement_hud_banner.anchor_top = 0.0
+		placement_hud_banner.anchor_bottom = 0.0
+		placement_hud_banner.offset_left = -220.0
+		placement_hud_banner.offset_right = 220.0
+		placement_hud_banner.offset_top = 70.0
+		placement_hud_banner.offset_bottom = 115.0
+		placement_hud_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	
+	var b_name = GameState.buildings.get(placing_building_id, {}).get("name", "Building")
+	placement_status_label.text = "Placing %s (2x2): Tap clear grass" % b_name
+	placement_hud_banner.visible = true
+
+func _update_placement_ghost_pos():
+	if not is_placing_building or placement_ghost_node == null:
+		return
+	var local_pos = plots_root.get_local_mouse_position()
+	var origin_x = 0.0
+	var origin_y = -60.0
+	var dx = local_pos.x - origin_x
+	var dy = local_pos.y - origin_y
+	var gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
+	var gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
+	gx = clamp(gx, 0, 2)
+	gy = clamp(gy, 0, 2)
+	
+	var iso_x = origin_x + (gx - gy) * (ISO_W * 0.5)
+	var iso_y = origin_y + (gx + gy) * (ISO_H * 0.5)
+	placement_ghost_node.position = Vector2(iso_x, iso_y)
+	
+	var valid = GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
+	var spr = placement_ghost_node.get_node("GhostSprite") as Sprite2D
+	var badge = placement_ghost_node.get_node("GhostBadge") as Label
+	if valid:
+		spr.modulate = Color(0.6, 1.0, 0.6, 0.8)
+		badge.text = "[Tap Plot to Place 2x2]"
+		badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+	else:
+		spr.modulate = Color(1.0, 0.5, 0.5, 0.8)
+		badge.text = "[Blocked - Needs 2x2 Clear Grass]"
+		badge.modulate = Color(1.0, 0.6, 0.6, 1.0)
+
+func _handle_building_placement_click(idx: int):
+	var gx = idx % 4
+	var gy = idx / 4
+	gx = clamp(gx, 0, 2)
+	gy = clamp(gy, 0, 2)
+	
+	if GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy):
+		GameState.place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
+		var b_name = GameState.buildings[placing_building_id]["name"]
+		_stop_placement_mode()
+		_show_message("%s placed and locked to the grid!" % b_name, true)
+	else:
+		_show_message("Cannot place here! Needs a clean 2x2 grass space without obstacles.", false)

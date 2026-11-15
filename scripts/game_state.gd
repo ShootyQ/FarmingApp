@@ -10,6 +10,9 @@ signal barn_opened
 signal barn_updated
 signal farm_replaced
 signal tool_used(sector_coord: String, tile_idx: int, tool_id: String)
+signal workshop_opened
+signal workshop_unlocked_signal
+signal buildings_updated
 
 var coins: int = 150
 var wood: int = 10
@@ -20,6 +23,36 @@ var tool_tier: int = 0
 var selected_crop: String = "wheat"
 var current_sector_coord: String = "1,1"
 
+# Buildings & Placement System (2x2 grid footprints)
+# Red Barn starts on Homestead (1,1) at gx=0, gy=0 (occupies tiles 0, 1, 4, 5)
+var buildings: Dictionary = {
+	"barn": {
+		"id": "barn",
+		"name": "Red Barn",
+		"sector": "1,1",
+		"gx": 0,
+		"gy": 0,
+		"w": 2,
+		"h": 2,
+		"placed": true
+	},
+	"workshop": {
+		"id": "workshop",
+		"name": "Carpenter's Workshop",
+		"sector": "1,1",
+		"gx": 2,
+		"gy": 2,
+		"w": 2,
+		"h": 2,
+		"placed": false
+	}
+}
+
+# 10-Minute Gameplay Unlock for Workshop (600.0 seconds)
+var play_time_seconds: float = 0.0
+var workshop_unlocked: bool = false
+var crafted_recipes: Dictionary = {}
+
 # Seed Inventory / Seed Pouch (Stock of seeds held by player)
 var seed_inventory: Dictionary = {
 	"wheat": 8,
@@ -28,8 +61,8 @@ var seed_inventory: Dictionary = {
 	"pumpkin": 0
 }
 
-# Barn Storage: 10 spaces, stack size up to 10
-const BARN_SLOTS_MAX: int = 10
+# Barn Storage: 10 spaces base (upgradable to 15 in Workshop), stack size up to 10
+var barn_slots_max: int = 10
 const BARN_STACK_MAX: int = 10
 var barn_inventory: Array = []
 
@@ -111,15 +144,24 @@ func unlock_sector(coord: String) -> bool:
 
 func _generate_sector_tiles(coord: String):
 	var tiles: Array = []
-	var is_homestead = coord == "1,1"
+	var is_homestead = (coord == "1,1")
 	var supply = ["small_wood", "small_wood", "small_wood", "small_wood", "small_rock", "small_rock", "small_rock", "small_rock", "weed", "hardwood_stump", "granite_boulder"]
 	var supply_idx = 0
-	for i in range(16):
+	
+	for i in range(16): # 4x4 grid (gx = i % 4, gy = i / 4)
 		var tile: Dictionary = {}
-		if is_homestead and i in [5, 6, 9, 10]:
+		if is_homestead and i in [0, 1, 4, 5]:
+			# 2x2 Red Barn footprint at top-left corner
+			var is_origin = (i == 0)
+			tile = {
+				"type": "building",
+				"building_id": "barn",
+				"is_origin": is_origin,
+				"origin_idx": 0
+			}
+		elif is_homestead and i in [6, 7, 10, 11]:
+			# 4 starter farm soil plots in a clean 2x2 field adjacent to barn
 			tiles_become_soil(tile)
-		elif is_homestead and i == 0:
-			tile = {"type": "barn"}
 		else:
 			var kind: String = supply[supply_idx] if supply_idx < supply.size() else ["weed", "hardwood_stump", "granite_boulder", "ancient_relic_mound"].pick_random()
 			tile = _create_obstacle_tile(kind)
@@ -160,6 +202,16 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 	var used_tool = false
 	
 	match tile_type:
+		"building":
+			var b_id = tile.get("building_id", "")
+			if b_id == "barn":
+				barn_opened.emit()
+			elif b_id == "workshop":
+				workshop_opened.emit()
+		"barn":
+			barn_opened.emit()
+		"workshop":
+			workshop_opened.emit()
 		"obstacle":
 			used_tool = _handle_tap_obstacle(sector_coord, tile_idx, tile)
 		"soil":
@@ -168,14 +220,152 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 			used_tool = _handle_tap_grass(sector_coord, tile_idx, tile)
 		"preparing":
 			message_broadcast.emit("Preparing soil: %s remaining" % GameData.format_time(float(tile["prepare_started_at"]) + float(tile["prepare_duration"]) - Time.get_unix_time_from_system()), false)
-		"barn":
-			barn_opened.emit()
 	
 	tile_updated.emit(sector_coord, tile_idx)
 	if used_tool:
 		tool_used.emit(sector_coord, tile_idx, tool_id)
 	state_updated.emit()
 	save_game()
+
+# Building Placement & Management (2x2 Grid Footprints)
+func can_place_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:
+	if not is_sector_unlocked(sector_coord):
+		return false
+	if gx < 0 or gx > 2 or gy < 0 or gy > 2:
+		return false
+	var tiles = sector_tiles.get(sector_coord, [])
+	if tiles.size() < 16:
+		return false
+	for dy in range(2):
+		for dx in range(2):
+			var idx = (gy + dy) * 4 + (gx + dx)
+			var tile = tiles[idx]
+			var t_type = tile.get("type", "grass")
+			if t_type == "building":
+				if tile.get("building_id") != building_id:
+					return false # Collision with another building
+			elif t_type != "grass":
+				return false # Blocked by soil, stump, rock, weeds
+	return true
+
+func place_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:
+	if not can_place_building(building_id, sector_coord, gx, gy):
+		return false
+	
+	# If previously placed, clear old tiles
+	var b_data = buildings.get(building_id, {})
+	if b_data.get("placed", false):
+		var old_sec = b_data.get("sector", "")
+		var old_gx = int(b_data.get("gx", 0))
+		var old_gy = int(b_data.get("gy", 0))
+		var old_tiles = sector_tiles.get(old_sec, [])
+		if old_tiles.size() == 16:
+			for dy in range(2):
+				for dx in range(2):
+					var o_idx = (old_gy + dy) * 4 + (old_gx + dx)
+					var ot = old_tiles[o_idx]
+					if ot.get("type") == "building" and ot.get("building_id") == building_id:
+						old_tiles[o_idx] = {"type": "grass"}
+						tile_updated.emit(old_sec, o_idx)
+	
+	# Mark new 2x2 footprint
+	var tiles = sector_tiles.get(sector_coord, [])
+	var origin_idx = gy * 4 + gx
+	for dy in range(2):
+		for dx in range(2):
+			var idx = (gy + dy) * 4 + (gx + dx)
+			var is_orig = (dx == 0 and dy == 0)
+			tiles[idx] = {
+				"type": "building",
+				"building_id": building_id,
+				"is_origin": is_orig,
+				"origin_idx": origin_idx
+			}
+			tile_updated.emit(sector_coord, idx)
+	
+	if not buildings.has(building_id):
+		buildings[building_id] = {
+			"id": building_id,
+			"name": building_id.capitalize(),
+			"w": 2,
+			"h": 2
+		}
+	buildings[building_id]["placed"] = true
+	buildings[building_id]["sector"] = sector_coord
+	buildings[building_id]["gx"] = gx
+	buildings[building_id]["gy"] = gy
+	
+	save_game()
+	buildings_updated.emit()
+	state_updated.emit()
+	return true
+
+func unlock_workshop():
+	if workshop_unlocked:
+		return
+	workshop_unlocked = true
+	save_game()
+	workshop_unlocked_signal.emit()
+	state_updated.emit()
+	message_broadcast.emit("Carpenter's Workshop Unlocked! Ready to place on your farm!", true)
+
+# Workshop Crafting System
+func can_craft_recipe(recipe_id: String) -> bool:
+	var r = GameData.CRAFTING_RECIPES.get(recipe_id, {})
+	if r.is_empty():
+		return false
+	if r.get("is_unique", false) and crafted_recipes.get(recipe_id, 0) > 0:
+		return false
+	var cost = r.get("cost", {})
+	if cost.get("coins", 0) > coins:
+		return false
+	if cost.get("wood", 0) > wood:
+		return false
+	if cost.get("stone", 0) > stone:
+		return false
+	if cost.get("relics", 0) > relics:
+		return false
+	for item_key in cost:
+		if item_key in ["coins", "wood", "stone", "relics"]:
+			continue
+		var req_count = cost[item_key]
+		if get_barn_item_count(item_key) < req_count:
+			return false
+	return true
+
+func craft_recipe(recipe_id: String) -> bool:
+	if not can_craft_recipe(recipe_id):
+		var r = GameData.CRAFTING_RECIPES.get(recipe_id, {})
+		message_broadcast.emit("Insufficient materials to craft %s!" % r.get("name", "item"), false)
+		return false
+	
+	var r = GameData.CRAFTING_RECIPES[recipe_id]
+	var cost = r.get("cost", {})
+	coins -= cost.get("coins", 0)
+	wood -= cost.get("wood", 0)
+	stone -= cost.get("stone", 0)
+	relics -= cost.get("relics", 0)
+	for item_key in cost:
+		if item_key in ["coins", "wood", "stone", "relics"]:
+			continue
+		remove_from_barn(item_key, cost[item_key])
+	
+	crafted_recipes[recipe_id] = crafted_recipes.get(recipe_id, 0) + 1
+	
+	# Apply unique effects
+	if recipe_id == "barn_expansion_1":
+		barn_slots_max = 15
+		message_broadcast.emit("Reinforced Barn Loft built! Storage expanded to 15 slots!", true)
+	else:
+		var yield_item = r.get("yield_item", recipe_id)
+		var yield_count = r.get("yield_count", 1)
+		add_to_barn(yield_item, yield_count)
+		message_broadcast.emit("Crafted %dx %s! Stored safely in Barn." % [yield_count, r.get("name", "Item")], true)
+	
+	save_game()
+	state_updated.emit()
+	barn_updated.emit()
+	return true
 
 func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary) -> bool:
 	var obs_id = tile["obstacle_id"]
@@ -384,6 +574,11 @@ func get_save_data() -> Dictionary:
 		"sector_tiles": sector_tiles,
 		"barn_inventory": barn_inventory,
 		"seed_inventory": seed_inventory,
+		"buildings": buildings,
+		"play_time_seconds": play_time_seconds,
+		"workshop_unlocked": workshop_unlocked,
+		"barn_slots_max": barn_slots_max,
+		"crafted_recipes": crafted_recipes,
 		"save_time": Time.get_unix_time_from_system()
 	}
 func _write_save_data(path: String, data: Dictionary) -> bool:
@@ -513,8 +708,48 @@ func _apply_save_data(parsed: Dictionary):
 		if not resource_last_tick.has(coord):
 			resource_last_tick[coord] = Time.get_unix_time_from_system()
 
-	# Load barn storage
+	# Load barn storage & capacity
 	barn_inventory = parsed.get("barn_inventory", [])
+	barn_slots_max = parsed.get("barn_slots_max", 10)
+	
+	# Load workshop & gameplay timer
+	play_time_seconds = float(parsed.get("play_time_seconds", 0.0))
+	workshop_unlocked = bool(parsed.get("workshop_unlocked", false))
+	crafted_recipes = parsed.get("crafted_recipes", {})
+	
+	# Load buildings
+	if parsed.has("buildings") and typeof(parsed["buildings"]) == TYPE_DICTIONARY:
+		buildings = parsed["buildings"]
+	
+	# Ensure Homestead has 2x2 Red Barn footprint at (0,0) -> tiles 0, 1, 4, 5
+	var h_tiles = sector_tiles.get("1,1", [])
+	if h_tiles.size() == 16:
+		for idx in [0, 1, 4, 5]:
+			h_tiles[idx] = {
+				"type": "building",
+				"building_id": "barn",
+				"is_origin": (idx == 0),
+				"origin_idx": 0
+			}
+	
+	# If workshop was placed, verify its tiles are marked
+	var ws_data = buildings.get("workshop", {})
+	if ws_data.get("placed", false):
+		var ws_sec = ws_data.get("sector", "1,1")
+		var ws_gx = int(ws_data.get("gx", 2))
+		var ws_gy = int(ws_data.get("gy", 2))
+		var ws_tiles = sector_tiles.get(ws_sec, [])
+		if ws_tiles.size() == 16:
+			var ws_origin_idx = ws_gy * 4 + ws_gx
+			for dy in range(2):
+				for dx in range(2):
+					var idx = (ws_gy + dy) * 4 + (ws_gx + dx)
+					ws_tiles[idx] = {
+						"type": "building",
+						"building_id": "workshop",
+						"is_origin": (dx == 0 and dy == 0),
+						"origin_idx": ws_origin_idx
+					}
 	
 	# Load seed inventory
 	var loaded_seeds = parsed.get("seed_inventory", {})
@@ -525,11 +760,6 @@ func _apply_save_data(parsed: Dictionary):
 	for cid in GameData.CROPS:
 		if not cid in seed_inventory:
 			seed_inventory[cid] = 0
-	
-	# Ensure Homestead tile 0 is always the Red Barn
-	var h_tiles = sector_tiles.get("1,1", [])
-	if h_tiles.size() > 0:
-		h_tiles[0] = {"type": "barn"}
 	
 	# Calculate offline crop growth
 	update_crop_timers()
@@ -555,7 +785,32 @@ func buy_seeds(crop_id: String, amount: int = 1) -> bool:
 		message_broadcast.emit("Need %dc to buy %dx %s Seeds!" % [total_cost, amount, c.get("name", "Crop")], false)
 		return false
 
-# Barn Inventory Management (10 slots, stack of 10 max)
+# Barn Inventory Management
+func get_barn_item_count(item_id: String) -> int:
+	var total = 0
+	for slot in barn_inventory:
+		if slot.get("id") == item_id:
+			total += int(slot.get("count", 0))
+	return total
+
+func remove_from_barn(item_id: String, amount: int) -> bool:
+	if get_barn_item_count(item_id) < amount:
+		return false
+	var remaining = amount
+	var i = barn_inventory.size() - 1
+	while i >= 0 and remaining > 0:
+		var slot = barn_inventory[i]
+		if slot.get("id") == item_id:
+			var take = min(remaining, slot.get("count", 0))
+			slot["count"] -= take
+			remaining -= take
+			if slot["count"] <= 0:
+				barn_inventory.remove_at(i)
+		i -= 1
+	save_game()
+	barn_updated.emit()
+	return true
+
 func add_to_barn(item_id: String, amount: int = 1) -> bool:
 	var item_info = GameData.get_item_info(item_id)
 	var remaining = amount
@@ -571,8 +826,8 @@ func add_to_barn(item_id: String, amount: int = 1) -> bool:
 				barn_updated.emit()
 				return true
 				
-	# Pass 2: Fill empty slots if barn has fewer than 10 slots
-	while remaining > 0 and barn_inventory.size() < BARN_SLOTS_MAX:
+	# Pass 2: Fill empty slots up to barn_slots_max (10 base, 15 upgraded)
+	while remaining > 0 and barn_inventory.size() < barn_slots_max:
 		var take = min(remaining, BARN_STACK_MAX)
 		barn_inventory.append({
 			"id": item_id,

@@ -171,6 +171,116 @@ const ITEMS = {
 		"name": "Haunted Pumpkin [Legendary]",
 		"icon": "res://assets/icons/icon_haunted_pumpkin.png",
 		"desc": "Spooky glowing purple pumpkin with mysterious essence."
+	},
+	"wooden_fence": {
+		"name": "Rustic Picket Fence",
+		"sell_value": 35,
+		"icon": "res://assets/ui/res_icon_wood.png",
+		"desc": "Hand-carved cedar fence post section to beautify plots."
+	},
+	"stone_well": {
+		"name": "Cobblestone Well",
+		"sell_value": 200,
+		"icon": "res://assets/ui/res_icon_stone.png",
+		"desc": "Fresh wellspring that keeps adjacent crops hydrated (+15% grow speed)."
+	},
+	"lantern_post": {
+		"name": "Brass Lantern Post",
+		"sell_value": 60,
+		"icon": "res://assets/ui/res_icon_relic.png",
+		"desc": "Warm kerosene lamp post casting a cozy glow over the fields."
+	},
+	"planter_box": {
+		"name": "Floral Planter Box",
+		"sell_value": 75,
+		"icon": "res://assets/icons/icon_wheat.png",
+		"desc": "Fragrant cedar planter filled with wildflowers."
+	},
+	"timber_plank": {
+		"name": "Cured Timber Plank",
+		"sell_value": 25,
+		"icon": "res://assets/ui/res_icon_wood.png",
+		"desc": "Dense milled lumber ready for advanced farm construction."
+	},
+	"cut_stone": {
+		"name": "Chiseled Stone Masonry",
+		"sell_value": 25,
+		"icon": "res://assets/ui/res_icon_stone.png",
+		"desc": "Square cut foundation stone blocks for durable structures."
+	}
+}
+
+# Carpenter's Workshop Crafting Recipes Database
+const CRAFTING_RECIPES = {
+	"wooden_fence": {
+		"id": "wooden_fence",
+		"name": "Rustic Picket Fence",
+		"category": "Decor",
+		"desc": "Hand-carved cedar fence post section to beautify plots.",
+		"cost": {"wood": 4, "coins": 10},
+		"yield_item": "wooden_fence",
+		"yield_count": 2,
+		"is_unique": false
+	},
+	"stone_well": {
+		"id": "stone_well",
+		"name": "Cobblestone Well",
+		"category": "Farmstead",
+		"desc": "Fresh wellspring that keeps adjacent crops hydrated (+15% grow speed).",
+		"cost": {"stone": 20, "wood": 10, "coins": 75},
+		"yield_item": "stone_well",
+		"yield_count": 1,
+		"is_unique": false
+	},
+	"lantern_post": {
+		"id": "lantern_post",
+		"name": "Brass Lantern Post",
+		"category": "Decor",
+		"desc": "Warm kerosene lamp post casting a cozy glow over the fields.",
+		"cost": {"wood": 6, "stone": 4, "coins": 25},
+		"yield_item": "lantern_post",
+		"yield_count": 1,
+		"is_unique": false
+	},
+	"planter_box": {
+		"id": "planter_box",
+		"name": "Floral Planter Box",
+		"category": "Decor",
+		"desc": "Fragrant cedar planter filled with wildflowers.",
+		"cost": {"wood": 8, "wheat": 2, "coins": 30},
+		"yield_item": "planter_box",
+		"yield_count": 1,
+		"is_unique": false
+	},
+	"timber_plank": {
+		"id": "timber_plank",
+		"name": "Cured Timber Plank",
+		"category": "Refining",
+		"desc": "Dense milled lumber ready for advanced farm construction.",
+		"cost": {"wood": 5},
+		"yield_item": "timber_plank",
+		"yield_count": 2,
+		"is_unique": false
+	},
+	"cut_stone": {
+		"id": "cut_stone",
+		"name": "Chiseled Stone Masonry",
+		"category": "Refining",
+		"desc": "Square cut foundation stone blocks for durable structures.",
+		"cost": {"stone": 5},
+		"yield_item": "cut_stone",
+		"yield_count": 2,
+		"is_unique": false
+	},
+	"barn_expansion_1": {
+		"id": "barn_expansion_1",
+		"name": "Reinforced Barn Loft",
+		"category": "Farmstead",
+		"desc": "Expands your Barn storage capacity from 10 to 15 slots!",
+		"cost": {"wood": 30, "stone": 20, "coins": 250},
+		"yield_item": "barn_expansion_1",
+		"yield_count": 1,
+		"is_unique": true
 	}
 }
 
