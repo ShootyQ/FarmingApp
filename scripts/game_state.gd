@@ -231,21 +231,25 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 func can_place_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:
 	if not is_sector_unlocked(sector_coord):
 		return false
-	if gx < 0 or gx > 2 or gy < 0 or gy > 2:
+	if gx < GameData.MEADOW_MIN or gx > GameData.MEADOW_MAX - 1 or gy < GameData.MEADOW_MIN or gy > GameData.MEADOW_MAX - 1:
 		return false
 	var tiles = sector_tiles.get(sector_coord, [])
-	if tiles.size() < 16:
-		return false
 	for dy in range(2):
 		for dx in range(2):
-			var idx = (gy + dy) * 4 + (gx + dx)
+			var idx = GameData.get_farm_index(Vector2i(gx + dx, gy + dy))
+			if idx < 0 or idx >= tiles.size():
+				return false
 			var tile = tiles[idx]
 			var t_type = tile.get("type", "grass")
 			if t_type == "building":
 				if tile.get("building_id") != building_id:
 					return false # Collision with another building
-			elif t_type != "grass":
-				return false # Blocked by soil, stump, rock, weeds
+			elif t_type == "grass":
+				pass # Valid clear meadow grass
+			elif t_type == "soil" and tile.get("state", "empty") == "empty":
+				pass # Valid empty tilled soil plot
+			else:
+				return false # Blocked by obstacle, tree, boulder, or growing crops
 	return true
 
 func place_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:
@@ -259,10 +263,10 @@ func place_building(building_id: String, sector_coord: String, gx: int, gy: int)
 		var old_gx = int(b_data.get("gx", 0))
 		var old_gy = int(b_data.get("gy", 0))
 		var old_tiles = sector_tiles.get(old_sec, [])
-		if old_tiles.size() == 16:
-			for dy in range(2):
-				for dx in range(2):
-					var o_idx = (old_gy + dy) * 4 + (old_gx + dx)
+		for dy in range(2):
+			for dx in range(2):
+				var o_idx = GameData.get_farm_index(Vector2i(old_gx + dx, old_gy + dy))
+				if o_idx >= 0 and o_idx < old_tiles.size():
 					var ot = old_tiles[o_idx]
 					if ot.get("type") == "building" and ot.get("building_id") == building_id:
 						old_tiles[o_idx] = {"type": "grass"}
@@ -270,18 +274,19 @@ func place_building(building_id: String, sector_coord: String, gx: int, gy: int)
 	
 	# Mark new 2x2 footprint
 	var tiles = sector_tiles.get(sector_coord, [])
-	var origin_idx = gy * 4 + gx
+	var origin_idx = GameData.get_farm_index(Vector2i(gx, gy))
 	for dy in range(2):
 		for dx in range(2):
-			var idx = (gy + dy) * 4 + (gx + dx)
-			var is_orig = (dx == 0 and dy == 0)
-			tiles[idx] = {
-				"type": "building",
-				"building_id": building_id,
-				"is_origin": is_orig,
-				"origin_idx": origin_idx
-			}
-			tile_updated.emit(sector_coord, idx)
+			var idx = GameData.get_farm_index(Vector2i(gx + dx, gy + dy))
+			if idx >= 0 and idx < tiles.size():
+				var is_orig = (dx == 0 and dy == 0)
+				tiles[idx] = {
+					"type": "building",
+					"building_id": building_id,
+					"is_origin": is_orig,
+					"origin_idx": origin_idx
+				}
+				tile_updated.emit(sector_coord, idx)
 	
 	if not buildings.has(building_id):
 		buildings[building_id] = {
@@ -723,14 +728,17 @@ func _apply_save_data(parsed: Dictionary):
 	
 	# Ensure Homestead has 2x2 Red Barn footprint at (0,0) -> tiles 0, 1, 4, 5
 	var h_tiles = sector_tiles.get("1,1", [])
-	if h_tiles.size() == 16:
-		for idx in [0, 1, 4, 5]:
-			h_tiles[idx] = {
-				"type": "building",
-				"building_id": "barn",
-				"is_origin": (idx == 0),
-				"origin_idx": 0
-			}
+	if h_tiles.size() >= 16:
+		for dy in range(2):
+			for dx in range(2):
+				var idx = GameData.get_farm_index(Vector2i(dx, dy))
+				if idx >= 0 and idx < h_tiles.size():
+					h_tiles[idx] = {
+						"type": "building",
+						"building_id": "barn",
+						"is_origin": (dx == 0 and dy == 0),
+						"origin_idx": 0
+					}
 	
 	# If workshop was placed, verify its tiles are marked
 	var ws_data = buildings.get("workshop", {})
@@ -739,11 +747,11 @@ func _apply_save_data(parsed: Dictionary):
 		var ws_gx = int(ws_data.get("gx", 2))
 		var ws_gy = int(ws_data.get("gy", 2))
 		var ws_tiles = sector_tiles.get(ws_sec, [])
-		if ws_tiles.size() == 16:
-			var ws_origin_idx = ws_gy * 4 + ws_gx
-			for dy in range(2):
-				for dx in range(2):
-					var idx = (ws_gy + dy) * 4 + (ws_gx + dx)
+		var ws_origin_idx = GameData.get_farm_index(Vector2i(ws_gx, ws_gy))
+		for dy in range(2):
+			for dx in range(2):
+				var idx = GameData.get_farm_index(Vector2i(ws_gx + dx, ws_gy + dy))
+				if idx >= 0 and idx < ws_tiles.size():
 					ws_tiles[idx] = {
 						"type": "building",
 						"building_id": "workshop",

@@ -974,8 +974,9 @@ func _render_plot(idx: int):
 	var obj_sprite = node.get_node("ObjectSprite") as Sprite2D
 	var badge = node.get_node("Badge") as Label
 	soil_sprite.modulate = Color.WHITE
-	var gx = idx % 4
-	var gy = idx / 4
+	var pos = GameData.farm_coordinates[idx] if idx < GameData.farm_coordinates.size() else Vector2i(idx % 4, idx / 4)
+	var gx = pos.x
+	var gy = pos.y
 	
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
 	if idx >= tiles.size():
@@ -2417,8 +2418,8 @@ func _update_placement_ghost_pos():
 	var dy = local_pos.y - origin_y
 	var gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
 	var gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
-	gx = clamp(gx, 0, 2)
-	gy = clamp(gy, 0, 2)
+	gx = clamp(gx, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	gy = clamp(gy, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
 	
 	var iso_x = origin_x + (gx - gy) * (ISO_W * 0.5)
 	var iso_y = origin_y + (gx + gy) * (ISO_H * 0.5)
@@ -2433,14 +2434,15 @@ func _update_placement_ghost_pos():
 		badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
 	else:
 		spr.modulate = Color(1.0, 0.5, 0.5, 0.8)
-		badge.text = "[Blocked - Needs 2x2 Clear Grass]"
+		badge.text = "[Blocked - Needs 2x2 Clear Space]"
 		badge.modulate = Color(1.0, 0.6, 0.6, 1.0)
 
 func _handle_building_placement_click(idx: int):
-	var gx = idx % 4
-	var gy = idx / 4
-	gx = clamp(gx, 0, 2)
-	gy = clamp(gy, 0, 2)
+	if idx < 0 or idx >= GameData.farm_coordinates.size():
+		return
+	var pos = GameData.farm_coordinates[idx]
+	var gx = clamp(pos.x, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	var gy = clamp(pos.y, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
 	
 	if GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy):
 		GameState.place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
@@ -2448,4 +2450,4 @@ func _handle_building_placement_click(idx: int):
 		_stop_placement_mode()
 		_show_message("%s placed and locked to the grid!" % b_name, true)
 	else:
-		_show_message("Cannot place here! Needs a clean 2x2 grass space without obstacles.", false)
+		_show_message("Cannot place here! Needs clear grass or empty soil without obstacles.", false)
