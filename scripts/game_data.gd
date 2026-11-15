@@ -210,6 +210,13 @@ const ITEMS = {
 	}
 }
 
+# Workshop Construction Requirements (~10 minutes of active gameplay to earn)
+const WORKSHOP_CONSTRUCTION_COST = {
+	"coins": 350,
+	"wood": 15,
+	"stone": 10
+}
+
 # Carpenter's Workshop Crafting Recipes Database
 const CRAFTING_RECIPES = {
 	"wooden_fence": {

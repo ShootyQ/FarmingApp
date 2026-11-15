@@ -305,6 +305,26 @@ func place_building(building_id: String, sector_coord: String, gx: int, gy: int)
 	state_updated.emit()
 	return true
 
+func can_build_workshop() -> bool:
+	if workshop_unlocked:
+		return false
+	var cost = GameData.WORKSHOP_CONSTRUCTION_COST
+	return coins >= cost["coins"] and wood >= cost["wood"] and stone >= cost["stone"]
+
+func build_workshop() -> bool:
+	if workshop_unlocked or not can_build_workshop():
+		return false
+	var cost = GameData.WORKSHOP_CONSTRUCTION_COST
+	coins -= cost["coins"]
+	wood -= cost["wood"]
+	stone -= cost["stone"]
+	workshop_unlocked = true
+	save_game()
+	workshop_unlocked_signal.emit()
+	state_updated.emit()
+	message_broadcast.emit("Carpenter's Workshop Constructed! Ready to place on your farm!", true)
+	return true
+
 func unlock_workshop():
 	if workshop_unlocked:
 		return

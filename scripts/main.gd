@@ -124,6 +124,14 @@ var workshop_filter_category: String = "All"
 var workshop_balance_label: Label
 var workshop_btn: Button
 
+# Workshop Blueprint & Construction
+var workshop_blueprint_modal: Control
+var wp_cost_coins_lbl: Label
+var wp_cost_wood_lbl: Label
+var wp_cost_stone_lbl: Label
+var wp_construct_btn: Button
+var wp_hint_lbl: Label
+
 # Building Placement Mode (2x2 Grid Footprints)
 var is_placing_building: bool = false
 var placing_building_id: String = ""
@@ -189,6 +197,7 @@ func _ready():
 	_build_market_modal()
 	_build_barn_modal()
 	_build_workshop_modal()
+	_build_workshop_blueprint_modal()
 	_setup_map_buttons()
 	tool_menu = preload("res://scripts/tool_menu.gd").new()
 	$HUD.add_child(tool_menu)
@@ -243,8 +252,8 @@ func _ready():
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(workshop_btn)
 	
 	var dev_unlock_btn = Button.new()
-	dev_unlock_btn.text = "+10m"
-	dev_unlock_btn.tooltip_text = "Dev: Instant 10-minute skip to unlock Workshop"
+	dev_unlock_btn.text = "+Res"
+	dev_unlock_btn.tooltip_text = "Dev: Grant +350c +15w +10s to test Workshop Construction"
 	var dev_sb = StyleBoxFlat.new()
 	dev_sb.bg_color = Color(0.18, 0.14, 0.20, 0.85)
 	dev_sb.set_corner_radius_all(6)
@@ -252,7 +261,13 @@ func _ready():
 	dev_sb.content_margin_right = 6
 	dev_unlock_btn.add_theme_stylebox_override("normal", dev_sb)
 	dev_unlock_btn.pressed.connect(func():
-		GameState.unlock_workshop()
+		GameState.coins += 350
+		GameState.wood += 15
+		GameState.stone += 10
+		GameState.play_time_seconds += 600.0
+		GameState.save_game()
+		GameState.state_updated.emit()
+		_show_message("Dev: Added materials for Workshop construction (+350c, +15w, +10s)!", true)
 		_refresh_ui()
 	)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(dev_unlock_btn)
@@ -345,11 +360,7 @@ func _setup_mobile_hud():
 	frame.queue_free()
 
 func _process(delta: float):
-	if not GameState.workshop_unlocked:
-		GameState.play_time_seconds += delta
-		if GameState.play_time_seconds >= 600.0:
-			GameState.unlock_workshop()
-			
+	GameState.play_time_seconds += delta
 	_update_workshop_button_text()
 	if is_placing_building:
 		_update_placement_ghost_pos()
@@ -372,7 +383,7 @@ func _on_farm_replaced():
 	_refresh_ui()
 
 func _farm_modal_open() -> bool:
-	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible) or (workshop_modal and workshop_modal.visible)
+	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible) or (workshop_modal and workshop_modal.visible) or (workshop_blueprint_modal and workshop_blueprint_modal.visible)
 
 func _input(event: InputEvent):
 	# Finish tracked touches even when released over a HUD button.
@@ -877,7 +888,7 @@ func _on_plot_clicked(idx: int):
 	_render_plot(idx)
 
 func _close_farm_menus():
-	for modal in [map_modal, seed_modal, market_modal, barn_modal, workshop_modal, tool_menu]:
+	for modal in [map_modal, seed_modal, market_modal, barn_modal, workshop_modal, workshop_blueprint_modal, tool_menu]:
 		if modal:
 			modal.visible = false
 	is_dragging = false
@@ -955,6 +966,9 @@ func _refresh_ui():
 		
 	if workshop_modal and workshop_modal.visible:
 		_refresh_workshop_modal()
+		
+	if workshop_blueprint_modal and workshop_blueprint_modal.visible:
+		_refresh_workshop_blueprint_modal()
 	
 	# Tile signals refresh individual changes. Rerender the meadow only when its
 	# sector or tool requirements change, not all 400 tiles after every tap.
@@ -2138,20 +2152,250 @@ func _build_workshop_modal():
 	workshop_cards_container.add_theme_constant_override("separation", 8)
 	scroll.add_child(workshop_cards_container)
 
+# ==============================================================================
+# Carpenter's Workshop Blueprint & Construction System
+# (~10 minutes of active gameplay to earn 350 Coins, 15 Wood, 10 Stone)
+# ==============================================================================
+
+func _build_workshop_blueprint_modal():
+	workshop_blueprint_modal = Control.new()
+	workshop_blueprint_modal.name = "WorkshopBlueprintModal"
+	workshop_blueprint_modal.visible = false
+	$HUD.add_child(workshop_blueprint_modal)
+	workshop_blueprint_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	# Dimmed backdrop
+	var overlay = ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if event is InputEventMouseButton and event.pressed:
+			workshop_blueprint_modal.visible = false
+	)
+	workshop_blueprint_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	# Main blueprint board
+	var card = Panel.new()
+	card.anchor_left = 0.5
+	card.anchor_right = 0.5
+	card.anchor_top = 0.5
+	card.anchor_bottom = 0.5
+	card.offset_left = -340.0
+	card.offset_right = 340.0
+	card.offset_top = -230.0
+	card.offset_bottom = 230.0
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.14, 0.10, 0.06, 0.96)
+	sb.set_border_width_all(3)
+	sb.border_color = Color(0.85, 0.68, 0.38, 0.95)
+	sb.set_corner_radius_all(12)
+	card.add_theme_stylebox_override("panel", sb)
+	workshop_blueprint_modal.add_child(card)
+	
+	var inner_vbox = VBoxContainer.new()
+	inner_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	inner_vbox.offset_left = 24
+	inner_vbox.offset_right = -24
+	inner_vbox.offset_top = 18
+	inner_vbox.offset_bottom = -18
+	inner_vbox.add_theme_constant_override("separation", 12)
+	inner_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
+	card.add_child(inner_vbox)
+	
+	# Header HBox (Title + Close)
+	var header_hbox = HBoxContainer.new()
+	header_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	inner_vbox.add_child(header_hbox)
+	
+	var title_lbl = Label.new()
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_lbl.text = "CARPENTER'S WORKSHOP BLUEPRINT"
+	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.75, 1.0))
+	title_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 1.0))
+	title_lbl.add_theme_constant_override("shadow_offset_x", 1)
+	title_lbl.add_theme_constant_override("shadow_offset_y", 1)
+	header_hbox.add_child(title_lbl)
+	
+	var close_btn = Button.new()
+	close_btn.text = " [X] Close "
+	close_btn.custom_minimum_size = Vector2(90, 32)
+	close_btn.pressed.connect(func(): workshop_blueprint_modal.visible = false)
+	header_hbox.add_child(close_btn)
+	
+	# Middle HBox: Workshop Image Preview + Description
+	var preview_hbox = HBoxContainer.new()
+	preview_hbox.add_theme_constant_override("separation", 16)
+	inner_vbox.add_child(preview_hbox)
+	
+	var workshop_img = TextureRect.new()
+	workshop_img.texture = tex_workshop
+	workshop_img.custom_minimum_size = Vector2(100, 100)
+	workshop_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	workshop_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	preview_hbox.add_child(workshop_img)
+	
+	var desc_vbox = VBoxContainer.new()
+	desc_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	desc_vbox.add_theme_constant_override("separation", 5)
+	preview_hbox.add_child(desc_vbox)
+	
+	var desc_title = Label.new()
+	desc_title.text = "Handcrafted Wood & Stone Workshop (2x2 Building)"
+	desc_title.add_theme_font_size_override("font_size", 13)
+	desc_title.add_theme_color_override("font_color", Color(0.95, 0.82, 0.50, 1.0))
+	desc_vbox.add_child(desc_title)
+	
+	var desc_body = Label.new()
+	desc_body.text = "Build a dedicated workshop to refine raw timber and stone, craft rustic picket fences, cobblestone wells, and expand your Red Barn storage."
+	desc_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_body.add_theme_font_size_override("font_size", 12)
+	desc_body.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.95))
+	desc_vbox.add_child(desc_body)
+	
+	var desc_hint = Label.new()
+	desc_hint.text = "Goal: Earn resources from farming and obstacle clearing (~10 minutes of active play)."
+	desc_hint.add_theme_font_size_override("font_size", 11)
+	desc_hint.add_theme_color_override("font_color", Color(0.70, 0.85, 0.65, 0.95))
+	desc_vbox.add_child(desc_hint)
+	
+	# Resource Requirements Badges
+	var res_hbox = HBoxContainer.new()
+	res_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	res_hbox.add_theme_constant_override("separation", 12)
+	inner_vbox.add_child(res_hbox)
+	
+	var make_res_card = func(tex: Texture2D) -> Label:
+		var p = PanelContainer.new()
+		p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		p.custom_minimum_size = Vector2(0, 48)
+		var p_sb = StyleBoxFlat.new()
+		p_sb.bg_color = Color(0.20, 0.14, 0.09, 0.92)
+		p_sb.set_border_width_all(2)
+		p_sb.border_color = Color(0.55, 0.42, 0.28, 0.8)
+		p_sb.set_corner_radius_all(8)
+		p_sb.content_margin_left = 8
+		p_sb.content_margin_right = 8
+		p.add_theme_stylebox_override("panel", p_sb)
+		
+		var h = HBoxContainer.new()
+		h.alignment = BoxContainer.ALIGNMENT_CENTER
+		h.add_theme_constant_override("separation", 8)
+		p.add_child(h)
+		
+		var icon = TextureRect.new()
+		icon.texture = tex
+		icon.custom_minimum_size = Vector2(26, 26)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		h.add_child(icon)
+		
+		var lbl = Label.new()
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.add_theme_font_size_override("font_size", 13)
+		h.add_child(lbl)
+		
+		res_hbox.add_child(p)
+		return lbl
+	
+	wp_cost_coins_lbl = make_res_card.call(tex_res_coin)
+	wp_cost_wood_lbl = make_res_card.call(tex_res_wood)
+	wp_cost_stone_lbl = make_res_card.call(tex_res_stone)
+	
+	# Status / Missing Resources Hint
+	wp_hint_lbl = Label.new()
+	wp_hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wp_hint_lbl.add_theme_font_size_override("font_size", 12)
+	wp_hint_lbl.add_theme_color_override("font_color", Color(1.0, 0.80, 0.35, 1.0))
+	inner_vbox.add_child(wp_hint_lbl)
+	
+	# Construct Button
+	wp_construct_btn = Button.new()
+	wp_construct_btn.custom_minimum_size = Vector2(0, 46)
+	wp_construct_btn.text = "Construct & Place Workshop"
+	wp_construct_btn.pressed.connect(_on_construct_workshop_pressed)
+	inner_vbox.add_child(wp_construct_btn)
+
+func _refresh_workshop_blueprint_modal():
+	if not workshop_blueprint_modal:
+		return
+	var cost = GameData.WORKSHOP_CONSTRUCTION_COST
+	var req_coins = cost["coins"]
+	var req_wood = cost["wood"]
+	var req_stone = cost["stone"]
+	
+	var has_coins = GameState.coins >= req_coins
+	var has_wood = GameState.wood >= req_wood
+	var has_stone = GameState.stone >= req_stone
+	
+	if wp_cost_coins_lbl:
+		wp_cost_coins_lbl.text = "Coins: %d / %d" % [GameState.coins, req_coins]
+		wp_cost_coins_lbl.add_theme_color_override("font_color", Color(0.50, 1.0, 0.50) if has_coins else Color(1.0, 0.55, 0.45))
+		
+	if wp_cost_wood_lbl:
+		wp_cost_wood_lbl.text = "Wood: %d / %d" % [GameState.wood, req_wood]
+		wp_cost_wood_lbl.add_theme_color_override("font_color", Color(0.50, 1.0, 0.50) if has_wood else Color(1.0, 0.55, 0.45))
+		
+	if wp_cost_stone_lbl:
+		wp_cost_stone_lbl.text = "Stone: %d / %d" % [GameState.stone, req_stone]
+		wp_cost_stone_lbl.add_theme_color_override("font_color", Color(0.50, 1.0, 0.50) if has_stone else Color(1.0, 0.55, 0.45))
+		
+	var can_build = GameState.can_build_workshop()
+	if wp_construct_btn:
+		wp_construct_btn.disabled = not can_build
+		if can_build:
+			wp_construct_btn.text = "🔨 Construct & Place Workshop (Ready!)"
+			var sb_ready = StyleBoxFlat.new()
+			sb_ready.bg_color = Color(0.20, 0.45, 0.20, 0.95)
+			sb_ready.set_border_width_all(2)
+			sb_ready.border_color = Color(0.85, 1.0, 0.50, 1.0)
+			sb_ready.set_corner_radius_all(8)
+			wp_construct_btn.add_theme_stylebox_override("normal", sb_ready)
+			wp_construct_btn.add_theme_stylebox_override("hover", sb_ready)
+			wp_hint_lbl.text = "You have all the materials! Tap above to construct and place your Workshop."
+			wp_hint_lbl.add_theme_color_override("font_color", Color(0.60, 1.0, 0.60, 1.0))
+		else:
+			wp_construct_btn.text = "Need More Materials to Construct"
+			var sb_dis = StyleBoxFlat.new()
+			sb_dis.bg_color = Color(0.18, 0.14, 0.12, 0.80)
+			sb_dis.set_border_width_all(2)
+			sb_dis.border_color = Color(0.45, 0.35, 0.28, 0.6)
+			sb_dis.set_corner_radius_all(8)
+			wp_construct_btn.add_theme_stylebox_override("disabled", sb_dis)
+			var missing: Array[String] = []
+			if not has_coins: missing.append("%dc" % (req_coins - GameState.coins))
+			if not has_wood: missing.append("%dw" % (req_wood - GameState.wood))
+			if not has_stone: missing.append("%ds" % (req_stone - GameState.stone))
+			wp_hint_lbl.text = "Still needed: %s (Harvest crops and clear branches/pebbles!)" % "  •  ".join(missing)
+			wp_hint_lbl.add_theme_color_override("font_color", Color(1.0, 0.75, 0.40, 1.0))
+
+func _open_workshop_blueprint_modal():
+	_close_farm_menus()
+	_refresh_workshop_blueprint_modal()
+	if workshop_blueprint_modal:
+		workshop_blueprint_modal.visible = true
+
+func _on_construct_workshop_pressed():
+	if not GameState.can_build_workshop():
+		return
+	if GameState.build_workshop():
+		if workshop_blueprint_modal:
+			workshop_blueprint_modal.visible = false
+		_start_placement_mode("workshop")
+
 func _open_workshop_modal():
 	if not GameState.workshop_unlocked:
-		var remain = max(0, 600 - int(GameState.play_time_seconds))
-		_show_message("Carpenter's Workshop unlocks after 10m of gameplay (%dm %ds left)!" % [remain / 60, remain % 60], false)
+		_open_workshop_blueprint_modal()
 		return
 	if not GameState.buildings["workshop"].get("placed", false):
 		_start_placement_mode("workshop")
 		return
-	if seed_modal:
-		seed_modal.visible = false
-	if market_modal:
-		market_modal.visible = false
-	if barn_modal:
-		barn_modal.visible = false
+	_close_farm_menus()
 	workshop_modal.visible = true
 	_refresh_workshop_modal()
 
@@ -2284,8 +2528,7 @@ func _on_workshop_unlocked():
 
 func _on_workshop_btn_pressed():
 	if not GameState.workshop_unlocked:
-		var remain = max(0, 600 - int(GameState.play_time_seconds))
-		_show_message("Workshop unlocks after 10m of gameplay (%dm %ds left) or tap [+10m]!" % [remain / 60, remain % 60], false)
+		_open_workshop_blueprint_modal()
 	elif not GameState.buildings["workshop"].get("placed", false):
 		_start_placement_mode("workshop")
 	else:
@@ -2295,8 +2538,28 @@ func _update_workshop_button_text():
 	if not workshop_btn:
 		return
 	if not GameState.workshop_unlocked:
-		var remain = max(0, 600 - int(GameState.play_time_seconds))
-		workshop_btn.text = "Workshop (%dm %ds)" % [remain / 60, remain % 60]
+		if GameState.can_build_workshop():
+			workshop_btn.text = "🔨 Build Workshop!"
+			var sb_glow = StyleBoxFlat.new()
+			sb_glow.bg_color = Color(0.24, 0.38, 0.16, 0.95)
+			sb_glow.set_border_width_all(2)
+			sb_glow.border_color = Color(0.85, 1.0, 0.45, 1.0)
+			sb_glow.set_corner_radius_all(8)
+			sb_glow.content_margin_left = 10
+			sb_glow.content_margin_right = 10
+			sb_glow.content_margin_top = 4
+			workshop_btn.add_theme_stylebox_override("normal", sb_glow)
+		else:
+			workshop_btn.text = "Workshop Blueprint"
+			var sb_norm = StyleBoxFlat.new()
+			sb_norm.bg_color = Color(0.20, 0.14, 0.09, 0.90)
+			sb_norm.set_border_width_all(2)
+			sb_norm.border_color = Color(0.65, 0.50, 0.30, 0.85)
+			sb_norm.set_corner_radius_all(8)
+			sb_norm.content_margin_left = 10
+			sb_norm.content_margin_right = 10
+			sb_norm.content_margin_top = 4
+			workshop_btn.add_theme_stylebox_override("normal", sb_norm)
 	elif not GameState.buildings["workshop"].get("placed", false):
 		workshop_btn.text = "Place Workshop!"
 	else:
