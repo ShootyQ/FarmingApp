@@ -643,6 +643,14 @@ func start_new_farm() -> bool:
 	resource_last_tick = {}
 	barn_inventory = []
 	seed_inventory = {"wheat": 8, "carrot": 0, "strawberry": 0, "pumpkin": 0}
+	buildings = {
+		"barn": {"sector": "1,1", "gx": 0, "gy": 0, "w": 2, "h": 2, "placed": true},
+		"workshop": {"sector": "1,1", "gx": 0, "gy": 0, "w": 2, "h": 2, "placed": false}
+	}
+	workshop_unlocked = false
+	play_time_seconds = 0.0
+	barn_slots_max = 10
+	crafted_recipes = {}
 	_generate_sector_tiles("1,1")
 	if not save_game():
 		_apply_save_data(previous)

@@ -131,6 +131,7 @@ var wp_cost_wood_lbl: Label
 var wp_cost_stone_lbl: Label
 var wp_construct_btn: Button
 var wp_hint_lbl: Label
+var dev_unlock_btn: Button
 
 # Building Placement Mode (2x2 Grid Footprints)
 var is_placing_building: bool = false
@@ -251,7 +252,7 @@ func _ready():
 	workshop_btn.pressed.connect(_on_workshop_btn_pressed)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(workshop_btn)
 	
-	var dev_unlock_btn = Button.new()
+	dev_unlock_btn = Button.new()
 	dev_unlock_btn.text = "+Res"
 	dev_unlock_btn.tooltip_text = "Dev: Grant +350c +15w +10s to test Workshop Construction"
 	var dev_sb = StyleBoxFlat.new()
@@ -261,13 +262,22 @@ func _ready():
 	dev_sb.content_margin_right = 6
 	dev_unlock_btn.add_theme_stylebox_override("normal", dev_sb)
 	dev_unlock_btn.pressed.connect(func():
-		GameState.coins += 350
-		GameState.wood += 15
-		GameState.stone += 10
-		GameState.play_time_seconds += 600.0
-		GameState.save_game()
-		GameState.state_updated.emit()
-		_show_message("Dev: Added materials for Workshop construction (+350c, +15w, +10s)!", true)
+		if GameState.workshop_unlocked:
+			GameState.workshop_unlocked = false
+			if GameState.buildings.has("workshop"):
+				GameState.buildings["workshop"]["placed"] = false
+			GameState.save_game()
+			GameState.buildings_updated.emit()
+			GameState.state_updated.emit()
+			_show_message("Dev: Workshop relocked! Blueprint active.", true)
+		else:
+			GameState.coins += 350
+			GameState.wood += 15
+			GameState.stone += 10
+			GameState.play_time_seconds += 600.0
+			GameState.save_game()
+			GameState.state_updated.emit()
+			_show_message("Dev: Added materials for Workshop construction (+350c, +15w, +10s)!", true)
 		_refresh_ui()
 	)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(dev_unlock_btn)
@@ -2564,6 +2574,14 @@ func _update_workshop_button_text():
 		workshop_btn.text = "Place Workshop!"
 	else:
 		workshop_btn.text = "Workshop"
+		
+	if dev_unlock_btn:
+		if GameState.workshop_unlocked:
+			dev_unlock_btn.text = "Relock WS"
+			dev_unlock_btn.tooltip_text = "Dev: Relock Workshop to test Blueprint construction"
+		else:
+			dev_unlock_btn.text = "+Res"
+			dev_unlock_btn.tooltip_text = "Dev: Grant +350c +15w +10s to test Workshop Construction"
 
 # ==============================================================================
 # Building Placement System (2x2 Grid Footprints)
