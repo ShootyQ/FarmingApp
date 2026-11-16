@@ -85,7 +85,8 @@ func _run():
 	var legacy = {"tool_tier": 2, "coins": 321, "wood": 45, "stone": 67, "relics": 8,
 		"current_sector": "1,1", "unlocked_sectors": ["1,1", "1,0"],
 		"sector_tiles": {"1,1": [{"type": "barn"}, {"type": "grass"}]}, "seed_inventory": {"wheat": 7},
-		"barn_inventory": [{"id": "wheat", "name": "Wheat", "count": 3}]}
+		"barn_inventory": [{"id": "wheat", "name": "Wheat", "count": 3}],
+		"buildings": {"barn": {"id": "barn", "name": "Red Barn", "placed": true, "sector": "1,1", "gx": -2, "gy": -2, "w": 2, "h": 2}}}
 	var file = FileAccess.open(state.SAVE_PATH, FileAccess.WRITE)
 	file.store_string(JSON.stringify(legacy))
 	file.close()

@@ -27,7 +27,8 @@ func run():
 	original[7] = {"type": "soil", "state": "ready", "crop": "wheat", "is_mutated": false, "plant_time": 1, "grow_duration": 5}
 	var legacy = {"coins": 100, "wood": 12, "stone": 7, "relics": 1, "tool_tier": 0, "current_sector": "1,1",
 		"unlocked_sectors": ["1,1"], "sector_tiles": {"1,1": original},
-		"seed_inventory": {"wheat": 3}, "barn_inventory": []}
+		"seed_inventory": {"wheat": 3}, "barn_inventory": [],
+		"buildings": {"barn": {"id": "barn", "name": "Red Barn", "placed": true, "sector": "1,1", "gx": -2, "gy": -2, "w": 2, "h": 2}}}
 	var file = FileAccess.open(state.SAVE_PATH, FileAccess.WRITE)
 	file.store_string(JSON.stringify(legacy))
 	file.close()
@@ -37,7 +38,8 @@ func run():
 	for i in range(16):
 		check(state.sector_tiles["1,1"][i] == expected[i], "Original farm preserved")
 	for i in range(16, 400):
-		check(state.sector_tiles["1,1"][i] == {"type": "grass"}, "New meadow is clear grass")
+		if state.sector_tiles["1,1"][i].get("type") != "building":
+			check(state.sector_tiles["1,1"][i] == {"type": "grass"}, "New meadow is clear grass")
 	check(state.coins == 100 and state.wood == 12 and state.stone == 7 and state.tool_tier == 0, "Expansion never charges or changes resources")
 	check(typeof(state.sector_tiles["1,1"][2]["variant"]) == TYPE_FLOAT, "Fixture reproduces JSON variant decimals")
 	var farm = load("res://scenes/main.tscn").instantiate()

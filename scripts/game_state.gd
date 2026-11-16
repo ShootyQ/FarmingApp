@@ -13,6 +13,7 @@ signal tool_used(sector_coord: String, tile_idx: int, tool_id: String)
 signal workshop_opened
 signal workshop_unlocked_signal
 signal buildings_updated
+signal mode_changed(new_mode: String)
 
 var coins: int = 150
 var wood: int = 10
@@ -22,6 +23,14 @@ var relics: int = 0
 var tool_tier: int = 0
 var selected_crop: String = "wheat"
 var current_sector_coord: String = "1,1"
+var active_mode: String = "all" # "all", "plant", or "tools"
+
+func set_active_mode(new_mode: String):
+	if active_mode == new_mode:
+		return
+	active_mode = new_mode
+	mode_changed.emit(active_mode)
+	state_updated.emit()
 
 # Buildings & Placement System (2x2 grid footprints)
 # Red Barn starts on Homestead (1,1) at gx=0, gy=0 (occupies tiles 0, 1, 4, 5)
@@ -187,7 +196,7 @@ func _create_obstacle_tile(obs_id: String) -> Dictionary:
 	}
 
 # Context-sensitive interaction with a tile
-func interact_with_tile(sector_coord: String, tile_idx: int):
+func interact_with_tile(sector_coord: String, tile_idx: int, mode_override: String = ""):
 	update_crop_timers()
 	if not is_sector_unlocked(sector_coord):
 		return
@@ -200,6 +209,7 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 	var tile_type = tile.get("type", "grass")
 	var tool_id = GameData.get_tool_for_tile(tile)
 	var used_tool = false
+	var current_mode = mode_override if mode_override != "" else active_mode
 	
 	match tile_type:
 		"building":
@@ -213,11 +223,28 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 		"workshop":
 			workshop_opened.emit()
 		"obstacle":
-			used_tool = _handle_tap_obstacle(sector_coord, tile_idx, tile)
+			if current_mode == "tools" or current_mode == "all":
+				used_tool = _handle_tap_obstacle(sector_coord, tile_idx, tile)
+			else:
+				message_broadcast.emit("In Planting mode — switch to Tools to clear obstacles!", false)
 		"soil":
-			_handle_tap_soil(sector_coord, tile_idx, tile)
+			var soil_state = tile.get("state", "empty")
+			if soil_state == "ready":
+				# Ripe crops can be harvested in either mode
+				_handle_tap_soil(sector_coord, tile_idx, tile)
+			elif soil_state == "empty":
+				if current_mode == "plant" or current_mode == "all":
+					_handle_tap_soil(sector_coord, tile_idx, tile)
+				else:
+					message_broadcast.emit("In Tools mode — tap Planting to sow seeds!", false)
+			else:
+				_handle_tap_soil(sector_coord, tile_idx, tile)
 		"grass":
-			used_tool = _handle_tap_grass(sector_coord, tile_idx, tile)
+			if current_mode == "tools" or current_mode == "all":
+				used_tool = _handle_tap_grass(sector_coord, tile_idx, tile)
+			else:
+				# IN PLANTING MODE: PREVENT ACCIDENTAL HOEING!
+				message_broadcast.emit("In Planting mode — grass is protected! Tap Tools to till soil.", false)
 		"preparing":
 			message_broadcast.emit("Preparing soil: %s remaining" % GameData.format_time(float(tile["prepare_started_at"]) + float(tile["prepare_duration"]) - Time.get_unix_time_from_system()), false)
 	
@@ -226,6 +253,7 @@ func interact_with_tile(sector_coord: String, tile_idx: int):
 		tool_used.emit(sector_coord, tile_idx, tool_id)
 	state_updated.emit()
 	save_game()
+
 
 # Building Placement & Management (2x2 Grid Footprints)
 func can_place_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:

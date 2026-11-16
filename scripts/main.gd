@@ -133,12 +133,25 @@ var wp_construct_btn: Button
 var wp_hint_lbl: Label
 var dev_unlock_btn: Button
 
+# Mode Switcher (Planting vs Tools)
+var mode_switcher_bar: PanelContainer = null
+var mode_plant_btn: Button = null
+var mode_tools_btn: Button = null
+var dock_normal_wood_sb: StyleBoxFlat = null
+var dock_hover_wood_sb: StyleBoxFlat = null
+var dock_active_gold_sb: StyleBoxFlat = null
+
 # Building Placement Mode (2x2 Grid Footprints)
 var is_placing_building: bool = false
 var placing_building_id: String = ""
 var placement_ghost_node: Node2D = null
 var placement_hud_banner: PanelContainer = null
 var placement_status_label: Label = null
+var placement_confirm_btn: Button = null
+var placement_gx: int = 0
+var placement_gy: int = 0
+var placement_drag_offset: Vector2 = Vector2.ZERO
+var placement_touch_started_on_ghost: bool = false
 
 # Obstacle Variations: Weeds (4), Logs (2), Rocks (3)
 var tex_weeds = [
@@ -192,6 +205,7 @@ func _ready():
 		theme = touch_theme
 	_build_isometric_grid()
 	_setup_gardener_dock()
+	_setup_mode_switcher()
 	_setup_resource_bar()
 	_setup_zoom_controls()
 	_build_seed_modal()
@@ -211,6 +225,7 @@ func _ready():
 	GameState.farm_replaced.connect(_on_farm_replaced)
 	
 	GameState.state_updated.connect(_refresh_ui)
+	GameState.mode_changed.connect(_on_mode_changed)
 	GameState.tile_updated.connect(_on_tile_updated)
 	GameState.message_broadcast.connect(_show_message)
 	GameState.barn_opened.connect(_open_barn_modal)
@@ -283,6 +298,7 @@ func _ready():
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(dev_unlock_btn)
 	
 	if mobile_ui:
+		GameState.set_active_mode("plant")
 		_setup_mobile_hud()
 	_select_crop("wheat")
 	_refresh_ui()
@@ -328,10 +344,20 @@ func _setup_mobile_hud():
 	sector_title.clip_text = true
 	sector_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom_controls.columns = 2 if get_window().size.y >= get_window().size.x else 4
-	$HUD/Margin/VBox/TopBar/SectorInfo.add_theme_constant_override("separation", 8)
+	$HUD/Margin/VBox/TopBar/SectorInfo.add_theme_constant_override("separation", 6)
 	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.text = "Map"
 	$HUD/Margin/VBox/TopBar/SectorInfo/MapBtn.custom_minimum_size.y = 48
 	barn_btn.custom_minimum_size.y = 48
+	if workshop_btn:
+		workshop_btn.custom_minimum_size.y = 48
+	if dev_unlock_btn:
+		dev_unlock_btn.custom_minimum_size.y = 48
+	if mode_plant_btn:
+		mode_plant_btn.custom_minimum_size.y = 48
+	if mode_tools_btn:
+		mode_tools_btn.custom_minimum_size.y = 48
+	if mode_switcher_bar:
+		vbox.move_child(mode_switcher_bar, bottom_controls.get_index())
 	status_banner.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_banner.add_theme_font_size_override("font_size", 15)
 	for button in [dock_barn_btn, dock_active_seed_btn, dock_tool_btn, dock_market_btn]:
@@ -347,11 +373,24 @@ func _setup_mobile_hud():
 	var column = VBoxContainer.new()
 	column.add_theme_constant_override("separation", 12)
 	panel.add_child(column)
+	var barn_actions = HBoxContainer.new()
+	barn_actions.add_theme_constant_override("separation", 8)
+	column.add_child(barn_actions)
+	var move_barn = Button.new()
+	move_barn.text = "Move Barn"
+	move_barn.custom_minimum_size.y = 48
+	move_barn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	move_barn.pressed.connect(func():
+		barn_modal.visible = false
+		_start_placement_mode("barn")
+	)
+	barn_actions.add_child(move_barn)
 	var close = Button.new()
 	close.text = "Close Barn"
 	close.custom_minimum_size.y = 48
+	close.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	close.pressed.connect(func(): barn_modal.visible = false)
-	column.add_child(close)
+	barn_actions.add_child(close)
 	barn_title_label.reparent(column)
 	barn_title_label.custom_minimum_size = Vector2.ZERO
 	barn_title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -373,6 +412,23 @@ func _process(delta: float):
 	GameState.play_time_seconds += delta
 	_update_workshop_button_text()
 	if is_placing_building:
+		if touch_points.size() == 1 and not touch_was_multitouch and touch_moved:
+			var finger_pos: Vector2 = touch_points.values()[0]
+			var vp_size = get_viewport_rect().size
+			var edge_margin = 52.0
+			var edge_pan = Vector2.ZERO
+			if finger_pos.x < edge_margin:
+				edge_pan.x = -1.0
+			elif finger_pos.x > vp_size.x - edge_margin:
+				edge_pan.x = 1.0
+			if finger_pos.y < edge_margin + 90.0:
+				edge_pan.y = -1.0
+			elif finger_pos.y > vp_size.y - edge_margin - 120.0:
+				edge_pan.y = 1.0
+			if edge_pan != Vector2.ZERO:
+				camera.position += edge_pan.normalized() * (220.0 * delta / camera.zoom.x)
+				var g = _local_pos_to_grid(_screen_pos_to_local(finger_pos) + placement_drag_offset)
+				_set_placement_grid_pos(g.x, g.y)
 		_update_placement_ghost_pos()
 		
 	timer_elapsed += delta
@@ -401,7 +457,13 @@ func _input(event: InputEvent):
 		var tapped = not event.canceled and not touch_moved and not touch_was_multitouch and not _farm_modal_open()
 		touch_points.erase(event.index)
 		if tapped:
-			_handle_isometric_click(event.position)
+			if is_placing_building:
+				if placement_touch_started_on_ghost:
+					_confirm_building_placement()
+				else:
+					_update_placement_ghost_pos()
+			else:
+				_handle_isometric_click(event.position)
 		if touch_points.is_empty():
 			touch_was_multitouch = false
 			touch_moved = false
@@ -422,7 +484,10 @@ func _input(event: InputEvent):
 		else:
 			if event.position.distance_to(touch_start) > TAP_SLOP:
 				touch_moved = true
-			if touch_moved or touch_was_multitouch:
+			if is_placing_building and not touch_was_multitouch:
+				var g = _local_pos_to_grid(_screen_pos_to_local(event.position) + placement_drag_offset)
+				_set_placement_grid_pos(g.x, g.y)
+			elif touch_moved or touch_was_multitouch:
 				camera.position -= (event.position - previous) / camera.zoom
 		get_viewport().set_input_as_handled()
 
@@ -430,11 +495,33 @@ func _unhandled_input(event: InputEvent):
 	if _farm_modal_open():
 		is_dragging = false
 		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_TAB or event.keycode == KEY_Q:
+			_set_active_mode("tools" if GameState.active_mode == "plant" else "plant")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_1:
+			_set_active_mode("plant")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_2:
+			_set_active_mode("tools")
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventScreenTouch and event.pressed:
 		if touch_points.is_empty():
 			touch_start = event.position
 			touch_moved = false
 			touch_was_multitouch = false
+			if is_placing_building:
+				var local_pos = _screen_pos_to_local(event.position)
+				placement_touch_started_on_ghost = _is_local_pos_on_placement_ghost(local_pos)
+				if placement_touch_started_on_ghost:
+					placement_drag_offset = _grid_to_local_pos(placement_gx, placement_gy) - local_pos
+				else:
+					placement_drag_offset = Vector2.ZERO
+					var g = _local_pos_to_grid(local_pos)
+					_set_placement_grid_pos(g.x, g.y)
 		touch_points[event.index] = event.position
 		if touch_points.size() > 1:
 			touch_was_multitouch = true
@@ -452,20 +539,45 @@ func _unhandled_input(event: InputEvent):
 				total_drag_dist = 0.0
 				drag_start_mouse = event.position
 				drag_start_cam = camera.position
+				if is_placing_building:
+					var local_pos = _screen_pos_to_local(event.position)
+					placement_touch_started_on_ghost = _is_local_pos_on_placement_ghost(local_pos)
+					if placement_touch_started_on_ghost:
+						placement_drag_offset = _grid_to_local_pos(placement_gx, placement_gy) - local_pos
+					else:
+						placement_drag_offset = Vector2.ZERO
+						var g = _local_pos_to_grid(local_pos)
+						_set_placement_grid_pos(g.x, g.y)
 			else:
 				if is_dragging and total_drag_dist < TAP_SLOP:
-					_handle_isometric_click(event.position)
+					if is_placing_building:
+						if placement_touch_started_on_ghost or not mobile_ui:
+							_confirm_building_placement()
+						else:
+							_update_placement_ghost_pos()
+					else:
+						_handle_isometric_click(event.position)
 				is_dragging = false
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom_at(camera.zoom.x * 1.1, event.position)
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom_at(camera.zoom.x / 1.1, event.position)
-	elif event is InputEventMouseMotion and is_dragging:
-		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-			is_dragging = false
+	elif event is InputEventMouseMotion:
+		if event.device == InputEvent.DEVICE_ID_EMULATION:
 			return
-		total_drag_dist = maxf(total_drag_dist, event.position.distance_to(drag_start_mouse))
-		camera.position = drag_start_cam + (drag_start_mouse - event.position) / camera.zoom
+		if is_dragging:
+			if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+				is_dragging = false
+				return
+			total_drag_dist = maxf(total_drag_dist, event.position.distance_to(drag_start_mouse))
+			if is_placing_building:
+				var g = _local_pos_to_grid(_screen_pos_to_local(event.position) + placement_drag_offset)
+				_set_placement_grid_pos(g.x, g.y)
+			else:
+				camera.position = drag_start_cam + (drag_start_mouse - event.position) / camera.zoom
+		elif is_placing_building and not mobile_ui and touch_points.is_empty():
+			var g = _local_pos_to_grid(_screen_pos_to_local(event.position))
+			_set_placement_grid_pos(g.x, g.y)
 
 func _touch_center() -> Vector2:
 	var center = Vector2.ZERO
@@ -757,9 +869,13 @@ func _setup_gardener_dock():
 		sb.content_margin_bottom = 6
 		return sb
 		
-	var normal_wood = make_wood_sb.call(Color(0.20, 0.13, 0.08, 0.94), Color(0.60, 0.45, 0.25, 0.85))
-	var hover_wood = make_wood_sb.call(Color(0.28, 0.18, 0.11, 0.98), Color(0.95, 0.80, 0.35, 1.0))
-	var active_gold = make_wood_sb.call(Color(0.24, 0.15, 0.08, 0.96), Color(1.0, 0.82, 0.25, 1.0))
+	dock_normal_wood_sb = make_wood_sb.call(Color(0.20, 0.13, 0.08, 0.94), Color(0.60, 0.45, 0.25, 0.85))
+	dock_hover_wood_sb = make_wood_sb.call(Color(0.28, 0.18, 0.11, 0.98), Color(0.95, 0.80, 0.35, 1.0))
+	dock_active_gold_sb = make_wood_sb.call(Color(0.24, 0.15, 0.08, 0.96), Color(1.0, 0.82, 0.25, 1.0))
+	
+	var normal_wood = dock_normal_wood_sb
+	var hover_wood = dock_hover_wood_sb
+	var active_gold = dock_active_gold_sb
 	
 	var build_dock_button_content = func(btn: Button, icon_tex: Texture2D) -> Dictionary:
 		var inner = HBoxContainer.new()
@@ -832,7 +948,16 @@ func _setup_gardener_dock():
 	dock_active_seed_btn.add_theme_stylebox_override("normal", active_gold)
 	dock_active_seed_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_active_seed_btn.add_theme_stylebox_override("pressed", hover_wood)
-	dock_active_seed_btn.pressed.connect(_open_seed_modal)
+	dock_active_seed_btn.pressed.connect(func():
+		if mobile_ui:
+			if GameState.active_mode != "plant":
+				_set_active_mode("plant")
+			else:
+				_open_seed_modal()
+		else:
+			_set_active_mode("plant")
+			_open_seed_modal()
+	)
 	var s_parts = build_dock_button_content.call(dock_active_seed_btn, tex_dock_seed)
 	dock_seed_icon = s_parts["icon"]
 	dock_seed_title = s_parts["title"]
@@ -849,7 +974,16 @@ func _setup_gardener_dock():
 	dock_tool_btn.add_theme_stylebox_override("normal", normal_wood)
 	dock_tool_btn.add_theme_stylebox_override("hover", hover_wood)
 	dock_tool_btn.add_theme_stylebox_override("pressed", hover_wood)
-	dock_tool_btn.pressed.connect(_open_tool_menu)
+	dock_tool_btn.pressed.connect(func():
+		if mobile_ui:
+			if GameState.active_mode != "tools":
+				_set_active_mode("tools")
+			else:
+				_open_tool_menu()
+		else:
+			_set_active_mode("tools")
+			_open_tool_menu()
+	)
 	var t_parts = build_dock_button_content.call(dock_tool_btn, tex_dock_tools)
 	dock_tool_icon = t_parts["icon"]
 	dock_tool_title = t_parts["title"]
@@ -905,12 +1039,17 @@ func _refresh_gardener_dock():
 		var used = GameState.get_barn_used_slots()
 		dock_barn_sub.text = "Storage (%d/10)" % used
 		
+	var is_plant = (GameState.active_mode == "plant")
+	if dock_active_seed_btn and dock_tool_btn and dock_active_gold_sb and dock_normal_wood_sb:
+		dock_active_seed_btn.add_theme_stylebox_override("normal", dock_active_gold_sb if is_plant else dock_normal_wood_sb)
+		dock_tool_btn.add_theme_stylebox_override("normal", dock_normal_wood_sb if is_plant else dock_active_gold_sb)
+		
 	if dock_seed_title and dock_seed_sub:
 		var c = GameData.CROPS.get(GameState.selected_crop, {})
 		var count = GameState.get_seed_count(GameState.selected_crop)
-		dock_seed_title.text = "Seed: %s" % c.get("name", "Wheat")
+		dock_seed_title.text = ("Seed [ACTIVE]: %s" if is_plant else "Seed: %s") % c.get("name", "Wheat")
 		if count > 0:
-			dock_seed_sub.text = "%d in Pouch • [Change]" % count
+			dock_seed_sub.text = ("%d in Pouch • [Change]" if is_plant else "%d in Pouch • [Equip]") % count
 			dock_seed_sub.add_theme_color_override("font_color", Color(0.85, 0.78, 0.65, 0.95))
 		else:
 			dock_seed_sub.text = "0 in Pouch • [Buy Seeds]"
@@ -924,14 +1063,15 @@ func _refresh_gardener_dock():
 				dock_seed_icon.texture = tex_dock_seed
 		
 	if dock_tool_title and dock_tool_sub:
-		dock_tool_title.text = "Farm Tools"
+		var is_tools = (GameState.active_mode == "tools")
+		dock_tool_title.text = "Tools [ACTIVE]" if is_tools else "Farm Tools"
 		dock_tool_sub.text = "%s • %d/%d busy" % [GameData.TOOL_MATERIALS[GameState.tool_tier].capitalize(), GameState.get_preparation_count(), GameState.get_preparation_limit()]
 
 func _on_plot_clicked(idx: int):
 	if is_placing_building:
 		_handle_building_placement_click(idx)
 		return
-	GameState.interact_with_tile(GameState.current_sector_coord, idx)
+	GameState.interact_with_tile(GameState.current_sector_coord, idx, GameState.active_mode)
 	_render_plot(idx)
 
 func _close_farm_menus():
@@ -981,7 +1121,133 @@ func _on_map_sector_clicked(coord: String):
 		else:
 			_show_message("Must unlock an adjacent plot first!", false)
 
+func _setup_mode_switcher():
+	if mode_switcher_bar != null and is_instance_valid(mode_switcher_bar):
+		mode_switcher_bar.queue_free()
+	
+	mode_switcher_bar = PanelContainer.new()
+	mode_switcher_bar.name = "ModeSwitcherBar"
+	mode_switcher_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	
+	var bar_sb = StyleBoxFlat.new()
+	bar_sb.bg_color = Color(0.12, 0.09, 0.06, 0.92)
+	bar_sb.set_border_width_all(2)
+	bar_sb.border_color = Color(0.40, 0.32, 0.22, 0.85)
+	bar_sb.set_corner_radius_all(10)
+	bar_sb.content_margin_left = 6
+	bar_sb.content_margin_right = 6
+	bar_sb.content_margin_top = 4
+	bar_sb.content_margin_bottom = 4
+	mode_switcher_bar.add_theme_stylebox_override("panel", bar_sb)
+	
+	var hbox = HBoxContainer.new()
+	hbox.name = "ModeHBox"
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_theme_constant_override("separation", 8)
+	mode_switcher_bar.add_child(hbox)
+	
+	mode_plant_btn = Button.new()
+	mode_plant_btn.name = "ModePlantBtn"
+	mode_plant_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mode_plant_btn.custom_minimum_size.y = 48 if mobile_ui else 40
+	mode_plant_btn.clip_text = true
+	mode_plant_btn.pressed.connect(func(): _set_active_mode("plant"))
+	hbox.add_child(mode_plant_btn)
+	
+	mode_tools_btn = Button.new()
+	mode_tools_btn.name = "ModeToolsBtn"
+	mode_tools_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mode_tools_btn.custom_minimum_size.y = 48 if mobile_ui else 40
+	mode_tools_btn.clip_text = true
+	mode_tools_btn.pressed.connect(func(): _set_active_mode("tools"))
+	hbox.add_child(mode_tools_btn)
+	
+	var vbox = $HUD/Margin/VBox
+	vbox.add_child(mode_switcher_bar)
+	vbox.move_child(mode_switcher_bar, bottom_controls.get_index())
+	
+	_update_mode_switcher_ui()
+
+func _set_active_mode(new_mode: String):
+	if GameState.active_mode == new_mode:
+		return
+	GameState.set_active_mode(new_mode)
+	if new_mode == "plant":
+		var c = GameData.CROPS.get(GameState.selected_crop, {})
+		var count = GameState.get_seed_count(GameState.selected_crop)
+		_show_message("Planting Mode: Tap empty soil to sow %s (%d ready). Grass is protected!" % [c.get("name", "Seeds"), count], true)
+	else:
+		_show_message("Tools Mode: Tap grass to till into soil or obstacles to clear.", true)
+	_update_mode_switcher_ui()
+	_refresh_gardener_dock()
+
+func _on_mode_changed(_new_mode: String):
+	_update_mode_switcher_ui()
+	_refresh_gardener_dock()
+
+func _update_mode_switcher_ui():
+	if mode_plant_btn == null or mode_tools_btn == null:
+		return
+	var is_plant = (GameState.active_mode == "plant")
+	var crop_data = GameData.CROPS.get(GameState.selected_crop, {})
+	var c_name = crop_data.get("name", "Wheat")
+	var seed_count = GameState.get_seed_count(GameState.selected_crop)
+	var tool_mat = GameData.TOOL_MATERIALS[GameState.tool_tier].capitalize()
+	
+	var sb_plant = StyleBoxFlat.new()
+	sb_plant.set_corner_radius_all(8)
+	sb_plant.content_margin_left = 6
+	sb_plant.content_margin_right = 6
+	sb_plant.content_margin_top = 4
+	sb_plant.content_margin_bottom = 4
+	
+	var sb_tools = StyleBoxFlat.new()
+	sb_tools.set_corner_radius_all(8)
+	sb_tools.content_margin_left = 6
+	sb_tools.content_margin_right = 6
+	sb_tools.content_margin_top = 4
+	sb_tools.content_margin_bottom = 4
+	
+	if is_plant:
+		sb_plant.bg_color = Color(0.18, 0.40, 0.18, 0.96)
+		sb_plant.set_border_width_all(2)
+		sb_plant.border_color = Color(0.70, 1.0, 0.45, 1.0)
+		
+		sb_tools.bg_color = Color(0.18, 0.14, 0.11, 0.88)
+		sb_tools.set_border_width_all(1)
+		sb_tools.border_color = Color(0.50, 0.42, 0.32, 0.60)
+		
+		mode_plant_btn.text = "Plant [ACTIVE]: %s (%d)" % [c_name, seed_count]
+		mode_plant_btn.add_theme_color_override("font_color", Color(0.95, 1.0, 0.85, 1.0))
+		
+		mode_tools_btn.text = "Tools Mode: %s" % tool_mat
+		mode_tools_btn.add_theme_color_override("font_color", Color(0.75, 0.70, 0.65, 0.85))
+	else:
+		sb_plant.bg_color = Color(0.14, 0.18, 0.12, 0.88)
+		sb_plant.set_border_width_all(1)
+		sb_plant.border_color = Color(0.40, 0.48, 0.35, 0.60)
+		
+		sb_tools.bg_color = Color(0.38, 0.22, 0.10, 0.96)
+		sb_tools.set_border_width_all(2)
+		sb_tools.border_color = Color(1.0, 0.82, 0.30, 1.0)
+		
+		mode_plant_btn.text = "Plant Mode: %s (%d)" % [c_name, seed_count]
+		mode_plant_btn.add_theme_color_override("font_color", Color(0.75, 0.80, 0.70, 0.85))
+		
+		mode_tools_btn.text = "Tools [ACTIVE]: %s" % tool_mat
+		mode_tools_btn.add_theme_color_override("font_color", Color(1.0, 0.95, 0.80, 1.0))
+		
+	mode_plant_btn.add_theme_stylebox_override("normal", sb_plant)
+	mode_plant_btn.add_theme_stylebox_override("hover", sb_plant)
+	mode_plant_btn.add_theme_stylebox_override("pressed", sb_plant)
+	
+	mode_tools_btn.add_theme_stylebox_override("normal", sb_tools)
+	mode_tools_btn.add_theme_stylebox_override("hover", sb_tools)
+	mode_tools_btn.add_theme_stylebox_override("pressed", sb_tools)
+
 func _refresh_ui():
+	_update_mode_switcher_ui()
 	if tool_effects and effect_sector != GameState.current_sector_coord:
 		tool_effects.clear()
 		effect_sector = GameState.current_sector_coord
@@ -2082,11 +2348,90 @@ func _build_workshop_modal():
 	overlay.color = Color(0, 0, 0, 0.72)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay.gui_input.connect(func(event):
-		if event is InputEventMouseButton and event.pressed:
+		if (event is InputEventMouseButton and event.pressed) or (event is InputEventScreenTouch and event.pressed):
 			workshop_modal.visible = false
 	)
 	workshop_modal.add_child(overlay)
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	if mobile_ui:
+		var panel = PanelContainer.new()
+		var psb = StyleBoxFlat.new()
+		psb.bg_color = Color(0.14, 0.09, 0.06, 0.98)
+		psb.set_border_width_all(3)
+		psb.border_color = Color(0.75, 0.58, 0.35, 0.95)
+		psb.set_corner_radius_all(12)
+		psb.content_margin_left = 14
+		psb.content_margin_right = 14
+		psb.content_margin_top = 14
+		psb.content_margin_bottom = 14
+		panel.add_theme_stylebox_override("panel", psb)
+		workshop_modal.add_child(panel)
+		_fit_mobile_panel(panel)
+		
+		var vbox = VBoxContainer.new()
+		vbox.add_theme_constant_override("separation", 10)
+		panel.add_child(vbox)
+		
+		var top_hbox = HBoxContainer.new()
+		top_hbox.add_theme_constant_override("separation", 8)
+		vbox.add_child(top_hbox)
+		
+		var title_lbl = Label.new()
+		title_lbl.text = "Workshop"
+		title_lbl.add_theme_font_size_override("font_size", 20)
+		title_lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+		title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		top_hbox.add_child(title_lbl)
+		
+		var move_btn = Button.new()
+		move_btn.text = "Move Workshop"
+		move_btn.custom_minimum_size = Vector2(128, 48)
+		move_btn.pressed.connect(func():
+			workshop_modal.visible = false
+			_start_placement_mode("workshop")
+		)
+		top_hbox.add_child(move_btn)
+		
+		var close_btn = Button.new()
+		close_btn.text = "Close"
+		close_btn.custom_minimum_size = Vector2(84, 48)
+		close_btn.pressed.connect(func(): workshop_modal.visible = false)
+		top_hbox.add_child(close_btn)
+		
+		workshop_balance_label = Label.new()
+		workshop_balance_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		workshop_balance_label.add_theme_font_size_override("font_size", 14)
+		workshop_balance_label.add_theme_color_override("font_color", Color(1.0, 0.90, 0.40, 1.0))
+		vbox.add_child(workshop_balance_label)
+		
+		var tabs_hbox = HBoxContainer.new()
+		tabs_hbox.add_theme_constant_override("separation", 6)
+		vbox.add_child(tabs_hbox)
+		
+		for cat in ["All", "Decor", "Farmstead", "Refining"]:
+			var tab_btn = Button.new()
+			tab_btn.text = cat
+			tab_btn.name = "Tab_" + cat
+			tab_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			tab_btn.custom_minimum_size = Vector2(0, 44)
+			var c_name = cat
+			tab_btn.pressed.connect(func():
+				workshop_filter_category = c_name
+				_refresh_workshop_modal()
+			)
+			tabs_hbox.add_child(tab_btn)
+		
+		var scroll = ScrollContainer.new()
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		vbox.add_child(scroll)
+		
+		workshop_cards_container = VBoxContainer.new()
+		workshop_cards_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		workshop_cards_container.add_theme_constant_override("separation", 8)
+		scroll.add_child(workshop_cards_container)
+		return
 	
 	# Workshop Interior Frame
 	var frame = TextureRect.new()
@@ -2219,22 +2564,23 @@ func _build_workshop_blueprint_modal():
 	overlay.color = Color(0, 0, 0, 0.72)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay.gui_input.connect(func(event):
-		if event is InputEventMouseButton and event.pressed:
+		if (event is InputEventMouseButton and event.pressed) or (event is InputEventScreenTouch and event.pressed):
 			workshop_blueprint_modal.visible = false
 	)
 	workshop_blueprint_modal.add_child(overlay)
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
 	# Main blueprint board
-	var card = Panel.new()
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(680, 450)
 	card.anchor_left = 0.5
 	card.anchor_right = 0.5
 	card.anchor_top = 0.5
 	card.anchor_bottom = 0.5
 	card.offset_left = -340.0
 	card.offset_right = 340.0
-	card.offset_top = -230.0
-	card.offset_bottom = 230.0
+	card.offset_top = -225.0
+	card.offset_bottom = 225.0
 	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	card.grow_vertical = Control.GROW_DIRECTION_BOTH
 	card.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -2244,16 +2590,19 @@ func _build_workshop_blueprint_modal():
 	sb.set_border_width_all(3)
 	sb.border_color = Color(0.85, 0.68, 0.38, 0.95)
 	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 16 if mobile_ui else 24
+	sb.content_margin_right = 16 if mobile_ui else 24
+	sb.content_margin_top = 14 if mobile_ui else 18
+	sb.content_margin_bottom = 14 if mobile_ui else 18
 	card.add_theme_stylebox_override("panel", sb)
 	workshop_blueprint_modal.add_child(card)
+	if mobile_ui:
+		_fit_mobile_panel(card)
 	
 	var inner_vbox = VBoxContainer.new()
-	inner_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	inner_vbox.offset_left = 24
-	inner_vbox.offset_right = -24
-	inner_vbox.offset_top = 18
-	inner_vbox.offset_bottom = -18
-	inner_vbox.add_theme_constant_override("separation", 12)
+	inner_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inner_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inner_vbox.add_theme_constant_override("separation", 10 if mobile_ui else 12)
 	inner_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	card.add_child(inner_vbox)
 	
@@ -2264,8 +2613,9 @@ func _build_workshop_blueprint_modal():
 	
 	var title_lbl = Label.new()
 	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_lbl.text = "CARPENTER'S WORKSHOP BLUEPRINT"
-	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title_lbl.text = "Workshop Blueprint" if mobile_ui else "CARPENTER'S WORKSHOP BLUEPRINT"
+	title_lbl.add_theme_font_size_override("font_size", 18 if mobile_ui else 16)
 	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.75, 1.0))
 	title_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 1.0))
 	title_lbl.add_theme_constant_override("shadow_offset_x", 1)
@@ -2273,81 +2623,83 @@ func _build_workshop_blueprint_modal():
 	header_hbox.add_child(title_lbl)
 	
 	var close_btn = Button.new()
-	close_btn.text = " [X] Close "
-	close_btn.custom_minimum_size = Vector2(90, 32)
+	close_btn.text = "Close" if mobile_ui else " [X] Close "
+	close_btn.custom_minimum_size = Vector2(84, 48 if mobile_ui else 32)
 	close_btn.pressed.connect(func(): workshop_blueprint_modal.visible = false)
 	header_hbox.add_child(close_btn)
 	
 	# Middle HBox: Workshop Image Preview + Description
 	var preview_hbox = HBoxContainer.new()
-	preview_hbox.add_theme_constant_override("separation", 16)
+	preview_hbox.add_theme_constant_override("separation", 12 if mobile_ui else 16)
 	inner_vbox.add_child(preview_hbox)
 	
 	var workshop_img = TextureRect.new()
 	workshop_img.texture = tex_workshop
-	workshop_img.custom_minimum_size = Vector2(100, 100)
+	workshop_img.custom_minimum_size = Vector2(76, 76) if mobile_ui else Vector2(100, 100)
 	workshop_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	workshop_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	preview_hbox.add_child(workshop_img)
 	
 	var desc_vbox = VBoxContainer.new()
 	desc_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	desc_vbox.add_theme_constant_override("separation", 5)
+	desc_vbox.add_theme_constant_override("separation", 4)
 	preview_hbox.add_child(desc_vbox)
 	
 	var desc_title = Label.new()
 	desc_title.text = "Handcrafted Wood & Stone Workshop (2x2 Building)"
-	desc_title.add_theme_font_size_override("font_size", 13)
+	desc_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_title.add_theme_font_size_override("font_size", 14 if mobile_ui else 13)
 	desc_title.add_theme_color_override("font_color", Color(0.95, 0.82, 0.50, 1.0))
 	desc_vbox.add_child(desc_title)
 	
 	var desc_body = Label.new()
 	desc_body.text = "Build a dedicated workshop to refine raw timber and stone, craft rustic picket fences, cobblestone wells, and expand your Red Barn storage."
 	desc_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc_body.add_theme_font_size_override("font_size", 12)
+	desc_body.add_theme_font_size_override("font_size", 13 if mobile_ui else 12)
 	desc_body.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.95))
 	desc_vbox.add_child(desc_body)
 	
 	var desc_hint = Label.new()
 	desc_hint.text = "Goal: Earn resources from farming and obstacle clearing (~10 minutes of active play)."
-	desc_hint.add_theme_font_size_override("font_size", 11)
+	desc_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_hint.add_theme_font_size_override("font_size", 12 if mobile_ui else 11)
 	desc_hint.add_theme_color_override("font_color", Color(0.70, 0.85, 0.65, 0.95))
 	desc_vbox.add_child(desc_hint)
 	
 	# Resource Requirements Badges
 	var res_hbox = HBoxContainer.new()
 	res_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	res_hbox.add_theme_constant_override("separation", 12)
+	res_hbox.add_theme_constant_override("separation", 6 if mobile_ui else 12)
 	inner_vbox.add_child(res_hbox)
 	
 	var make_res_card = func(tex: Texture2D) -> Label:
 		var p = PanelContainer.new()
 		p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		p.custom_minimum_size = Vector2(0, 48)
+		p.custom_minimum_size = Vector2(0, 44 if mobile_ui else 48)
 		var p_sb = StyleBoxFlat.new()
 		p_sb.bg_color = Color(0.20, 0.14, 0.09, 0.92)
 		p_sb.set_border_width_all(2)
 		p_sb.border_color = Color(0.55, 0.42, 0.28, 0.8)
 		p_sb.set_corner_radius_all(8)
-		p_sb.content_margin_left = 8
-		p_sb.content_margin_right = 8
+		p_sb.content_margin_left = 4 if mobile_ui else 8
+		p_sb.content_margin_right = 4 if mobile_ui else 8
 		p.add_theme_stylebox_override("panel", p_sb)
 		
 		var h = HBoxContainer.new()
 		h.alignment = BoxContainer.ALIGNMENT_CENTER
-		h.add_theme_constant_override("separation", 8)
+		h.add_theme_constant_override("separation", 4 if mobile_ui else 8)
 		p.add_child(h)
 		
 		var icon = TextureRect.new()
 		icon.texture = tex
-		icon.custom_minimum_size = Vector2(26, 26)
+		icon.custom_minimum_size = Vector2(20, 20) if mobile_ui else Vector2(26, 26)
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		h.add_child(icon)
 		
 		var lbl = Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lbl.add_theme_font_size_override("font_size", 13)
+		lbl.add_theme_font_size_override("font_size", 12 if mobile_ui else 13)
 		h.add_child(lbl)
 		
 		res_hbox.add_child(p)
@@ -2360,13 +2712,14 @@ func _build_workshop_blueprint_modal():
 	# Status / Missing Resources Hint
 	wp_hint_lbl = Label.new()
 	wp_hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	wp_hint_lbl.add_theme_font_size_override("font_size", 12)
+	wp_hint_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	wp_hint_lbl.add_theme_font_size_override("font_size", 13 if mobile_ui else 12)
 	wp_hint_lbl.add_theme_color_override("font_color", Color(1.0, 0.80, 0.35, 1.0))
 	inner_vbox.add_child(wp_hint_lbl)
 	
 	# Construct Button
 	wp_construct_btn = Button.new()
-	wp_construct_btn.custom_minimum_size = Vector2(0, 46)
+	wp_construct_btn.custom_minimum_size = Vector2(0, 48 if mobile_ui else 46)
 	wp_construct_btn.text = "Construct & Place Workshop"
 	wp_construct_btn.pressed.connect(_on_construct_workshop_pressed)
 	inner_vbox.add_child(wp_construct_btn)
@@ -2384,15 +2737,15 @@ func _refresh_workshop_blueprint_modal():
 	var has_stone = GameState.stone >= req_stone
 	
 	if wp_cost_coins_lbl:
-		wp_cost_coins_lbl.text = "Coins: %d / %d" % [GameState.coins, req_coins]
+		wp_cost_coins_lbl.text = ("%d/%d" if mobile_ui else "Coins: %d / %d") % [GameState.coins, req_coins]
 		wp_cost_coins_lbl.add_theme_color_override("font_color", Color(0.50, 1.0, 0.50) if has_coins else Color(1.0, 0.55, 0.45))
 		
 	if wp_cost_wood_lbl:
-		wp_cost_wood_lbl.text = "Wood: %d / %d" % [GameState.wood, req_wood]
+		wp_cost_wood_lbl.text = ("%d/%d" if mobile_ui else "Wood: %d / %d") % [GameState.wood, req_wood]
 		wp_cost_wood_lbl.add_theme_color_override("font_color", Color(0.50, 1.0, 0.50) if has_wood else Color(1.0, 0.55, 0.45))
 		
 	if wp_cost_stone_lbl:
-		wp_cost_stone_lbl.text = "Stone: %d / %d" % [GameState.stone, req_stone]
+		wp_cost_stone_lbl.text = ("%d/%d" if mobile_ui else "Stone: %d / %d") % [GameState.stone, req_stone]
 		wp_cost_stone_lbl.add_theme_color_override("font_color", Color(0.50, 1.0, 0.50) if has_stone else Color(1.0, 0.55, 0.45))
 		
 	var can_build = GameState.can_build_workshop()
@@ -2407,7 +2760,7 @@ func _refresh_workshop_blueprint_modal():
 			sb_ready.set_corner_radius_all(8)
 			wp_construct_btn.add_theme_stylebox_override("normal", sb_ready)
 			wp_construct_btn.add_theme_stylebox_override("hover", sb_ready)
-			wp_hint_lbl.text = "You have all the materials! Tap above to construct and place your Workshop."
+			wp_hint_lbl.text = "You have all the materials! Tap below to construct and place your Workshop."
 			wp_hint_lbl.add_theme_color_override("font_color", Color(0.60, 1.0, 0.60, 1.0))
 		else:
 			wp_construct_btn.text = "Need More Materials to Construct"
@@ -2480,9 +2833,14 @@ func _refresh_workshop_modal():
 		csb.content_margin_bottom = 8
 		card.add_theme_stylebox_override("panel", csb)
 		
-		var h = HBoxContainer.new()
-		h.add_theme_constant_override("separation", 14)
+		var h = VBoxContainer.new() if mobile_ui else HBoxContainer.new()
+		h.add_theme_constant_override("separation", 10 if mobile_ui else 14)
 		card.add_child(h)
+		
+		var header_row = HBoxContainer.new() if mobile_ui else h
+		if mobile_ui:
+			header_row.add_theme_constant_override("separation", 12)
+			h.add_child(header_row)
 		
 		# Item Icon
 		var ic = TextureRect.new()
@@ -2500,12 +2858,12 @@ func _refresh_workshop_modal():
 			ic.texture = tex_dock_barn
 		else:
 			ic.texture = tex_res_wood
-		h.add_child(ic)
+		header_row.add_child(ic)
 		
 		# Recipe Info (Name, category, desc, cost)
 		var v = VBoxContainer.new()
 		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		h.add_child(v)
+		header_row.add_child(v)
 		
 		var title_h = HBoxContainer.new()
 		v.add_child(title_h)
@@ -2524,7 +2882,8 @@ func _refresh_workshop_modal():
 		
 		var dl = Label.new()
 		dl.text = r.get("desc", "")
-		dl.add_theme_font_size_override("font_size", 12)
+		dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		dl.add_theme_font_size_override("font_size", 13 if mobile_ui else 12)
 		dl.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
 		v.add_child(dl)
 		
@@ -2543,7 +2902,8 @@ func _refresh_workshop_modal():
 		
 		var cl = Label.new()
 		cl.text = "Cost: " + "  •  ".join(cost_strs)
-		cl.add_theme_font_size_override("font_size", 12)
+		cl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		cl.add_theme_font_size_override("font_size", 13 if mobile_ui else 12)
 		var can_craft = GameState.can_craft_recipe(r_id)
 		cl.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6, 1.0) if can_craft else Color(1.0, 0.6, 0.5, 0.9))
 		v.add_child(cl)
@@ -2562,6 +2922,7 @@ func _refresh_workshop_modal():
 			var craft_btn = Button.new()
 			var y_count = r.get("yield_count", 1)
 			craft_btn.text = " Craft " if y_count == 1 else " Craft (x%d) " % y_count
+			craft_btn.custom_minimum_size.y = 48 if mobile_ui else 0
 			craft_btn.disabled = not can_craft
 			var rec_id = r_id
 			craft_btn.pressed.connect(func():
@@ -2589,35 +2950,35 @@ func _update_workshop_button_text():
 		return
 	if not GameState.workshop_unlocked:
 		if GameState.can_build_workshop():
-			workshop_btn.text = "Build Workshop!"
+			workshop_btn.text = "Build WS!" if mobile_ui else "Build Workshop!"
 			var sb_glow = StyleBoxFlat.new()
 			sb_glow.bg_color = Color(0.24, 0.38, 0.16, 0.95)
 			sb_glow.set_border_width_all(2)
 			sb_glow.border_color = Color(0.85, 1.0, 0.45, 1.0)
 			sb_glow.set_corner_radius_all(8)
-			sb_glow.content_margin_left = 10
-			sb_glow.content_margin_right = 10
+			sb_glow.content_margin_left = 8 if mobile_ui else 10
+			sb_glow.content_margin_right = 8 if mobile_ui else 10
 			sb_glow.content_margin_top = 4
 			workshop_btn.add_theme_stylebox_override("normal", sb_glow)
 		else:
-			workshop_btn.text = "Workshop Blueprint"
+			workshop_btn.text = "Blueprint" if mobile_ui else "Workshop Blueprint"
 			var sb_norm = StyleBoxFlat.new()
 			sb_norm.bg_color = Color(0.20, 0.14, 0.09, 0.90)
 			sb_norm.set_border_width_all(2)
 			sb_norm.border_color = Color(0.65, 0.50, 0.30, 0.85)
 			sb_norm.set_corner_radius_all(8)
-			sb_norm.content_margin_left = 10
-			sb_norm.content_margin_right = 10
+			sb_norm.content_margin_left = 8 if mobile_ui else 10
+			sb_norm.content_margin_right = 8 if mobile_ui else 10
 			sb_norm.content_margin_top = 4
 			workshop_btn.add_theme_stylebox_override("normal", sb_norm)
 	elif not GameState.buildings["workshop"].get("placed", false):
-		workshop_btn.text = "Place Workshop!"
+		workshop_btn.text = "Place WS!" if mobile_ui else "Place Workshop!"
 	else:
 		workshop_btn.text = "Workshop"
 		
 	if dev_unlock_btn:
 		if GameState.workshop_unlocked:
-			dev_unlock_btn.text = "Relock WS"
+			dev_unlock_btn.text = "Relock" if mobile_ui else "Relock WS"
 			dev_unlock_btn.tooltip_text = "Dev: Relock Workshop to test Blueprint construction"
 		else:
 			dev_unlock_btn.text = "+Res"
@@ -2627,22 +2988,125 @@ func _update_workshop_button_text():
 # Building Placement System (2x2 Grid Footprints)
 # ==============================================================================
 
+func _screen_pos_to_local(screen_position: Vector2) -> Vector2:
+	return plots_root.get_global_transform_with_canvas().affine_inverse() * screen_position
+
+func _local_pos_to_grid(local_pos: Vector2) -> Vector2i:
+	var origin_x = 0.0
+	var origin_y = -60.0
+	var dx = local_pos.x - origin_x
+	var dy = local_pos.y - origin_y
+	var gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
+	var gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
+	gx = clampi(gx, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	gy = clampi(gy, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	return Vector2i(gx, gy)
+
+func _grid_to_local_pos(gx: int, gy: int) -> Vector2:
+	var origin_x = 0.0
+	var origin_y = -60.0
+	return Vector2(
+		origin_x + (gx - gy) * (ISO_W * 0.5),
+		origin_y + (gx + gy) * (ISO_H * 0.5)
+	)
+
+func _is_local_pos_on_placement_ghost(local_pos: Vector2) -> bool:
+	var g = _local_pos_to_grid(local_pos)
+	if g.x >= placement_gx and g.x <= placement_gx + 1 and g.y >= placement_gy and g.y <= placement_gy + 1:
+		return true
+	var base_cx = (placement_gx - placement_gy) * (ISO_W * 0.5)
+	var base_cy = (placement_gx + placement_gy + 1.0) * (ISO_H * 0.5) - 60.0
+	return local_pos.x >= (base_cx - 140.0) and local_pos.x <= (base_cx + 140.0) and \
+	       local_pos.y >= (base_cy - 260.0) and local_pos.y <= (base_cy + 50.0)
+
+func _is_single_tile_clear_for_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:
+	var tiles = GameState.sector_tiles.get(sector_coord, [])
+	var idx = GameData.get_farm_index(Vector2i(gx, gy))
+	if idx < 0 or idx >= tiles.size():
+		return false
+	var tile = tiles[idx]
+	var t_type = tile.get("type", "grass")
+	if t_type == "building":
+		return tile.get("building_id") == building_id
+	elif t_type == "grass":
+		return true
+	elif t_type == "soil" and tile.get("state", "empty") == "empty":
+		return true
+	return false
+
+func _find_initial_placement_coords(building_id: String) -> Vector2i:
+	var b_data = GameState.buildings.get(building_id, {})
+	if b_data.get("placed", false) and b_data.get("sector", "1,1") == GameState.current_sector_coord:
+		return Vector2i(
+			clampi(int(b_data.get("gx", 0)), GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1),
+			clampi(int(b_data.get("gy", 0)), GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+		)
+	var preferred: Array[Vector2i] = [
+		Vector2i(-2, 0), Vector2i(0, -2), Vector2i(4, 0), Vector2i(0, 4),
+		Vector2i(-2, 2), Vector2i(2, -2), Vector2i(4, 2), Vector2i(2, 4),
+		Vector2i(-2, -2), Vector2i(4, 4)
+	]
+	for cand in preferred:
+		if GameState.can_place_building(building_id, GameState.current_sector_coord, cand.x, cand.y):
+			return cand
+	for gy in range(GameData.MEADOW_MIN, GameData.MEADOW_MAX):
+		for gx in range(GameData.MEADOW_MIN, GameData.MEADOW_MAX):
+			if GameState.can_place_building(building_id, GameState.current_sector_coord, gx, gy):
+				return Vector2i(gx, gy)
+	return Vector2i(-2, 0)
+
+func _set_placement_grid_pos(gx: int, gy: int):
+	placement_gx = clampi(gx, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	placement_gy = clampi(gy, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	_update_placement_ghost_pos()
+
+func _nudge_placement_ghost(dx: int, dy: int):
+	if not is_placing_building:
+		return
+	_set_placement_grid_pos(placement_gx + dx, placement_gy + dy)
+	# Keep nudged ghost visible inside camera view
+	var ghost_local = _grid_to_local_pos(placement_gx, placement_gy)
+	var delta_cam = ghost_local - camera.position
+	var vp_half = (get_viewport_rect().size * 0.35) / camera.zoom.x
+	if absf(delta_cam.x) > vp_half.x or absf(delta_cam.y) > vp_half.y:
+		camera.position = ghost_local
+
+func _confirm_building_placement():
+	if not is_placing_building:
+		return
+	var idx = GameData.get_farm_index(Vector2i(placement_gx, placement_gy))
+	_handle_building_placement_click(idx)
+
 func _start_placement_mode(building_id: String):
+	_close_farm_menus()
 	is_placing_building = true
 	placing_building_id = building_id
-	if workshop_modal:
-		workshop_modal.visible = false
-	if barn_modal:
-		barn_modal.visible = false
-	if seed_modal:
-		seed_modal.visible = false
-	if market_modal:
-		market_modal.visible = false
+	placement_drag_offset = Vector2.ZERO
+	placement_touch_started_on_ghost = false
+	if bottom_controls:
+		bottom_controls.visible = false
+	if mode_switcher_bar:
+		mode_switcher_bar.visible = false
 		
 	if placement_ghost_node == null:
 		placement_ghost_node = Node2D.new()
 		placement_ghost_node.name = "PlacementGhost"
-		placement_ghost_node.z_index = 25
+		placement_ghost_node.z_index = 80
+		
+		# 2x2 isometric diamond footprint tiles under ghost
+		for dy in range(2):
+			for dx in range(2):
+				var poly = Polygon2D.new()
+				poly.name = "Footprint_%d_%d" % [dx, dy]
+				var cx = (dx - dy) * (ISO_W * 0.5)
+				var cy = (dx + dy) * (ISO_H * 0.5)
+				poly.polygon = PackedVector2Array([
+					Vector2(cx, cy - ISO_H * 0.48),
+					Vector2(cx + ISO_W * 0.48, cy),
+					Vector2(cx, cy + ISO_H * 0.48),
+					Vector2(cx - ISO_W * 0.48, cy)
+				])
+				placement_ghost_node.add_child(poly)
 		
 		var spr = Sprite2D.new()
 		spr.name = "GhostSprite"
@@ -2652,8 +3116,8 @@ func _start_placement_mode(building_id: String):
 		badge.name = "GhostBadge"
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		badge.position = Vector2(-120, -180)
-		badge.custom_minimum_size = Vector2(240, 30)
+		badge.position = Vector2(-140, -185)
+		badge.custom_minimum_size = Vector2(280, 32)
 		badge.add_theme_font_size_override("font_size", 14)
 		badge.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
 		badge.add_theme_constant_override("shadow_offset_x", 1)
@@ -2672,6 +3136,9 @@ func _start_placement_mode(building_id: String):
 		spr.scale = Vector2(1.15, 1.15)
 		spr.offset = Vector2(0, -104)
 	
+	var start_coords = _find_initial_placement_coords(building_id)
+	placement_gx = start_coords.x
+	placement_gy = start_coords.y
 	placement_ghost_node.visible = true
 	_show_placement_banner()
 	_update_placement_ghost_pos()
@@ -2679,10 +3146,16 @@ func _start_placement_mode(building_id: String):
 func _stop_placement_mode():
 	is_placing_building = false
 	placing_building_id = ""
+	placement_drag_offset = Vector2.ZERO
+	placement_touch_started_on_ghost = false
 	if placement_ghost_node:
 		placement_ghost_node.visible = false
 	if placement_hud_banner:
 		placement_hud_banner.visible = false
+	if bottom_controls:
+		bottom_controls.visible = true
+	if mode_switcher_bar:
+		mode_switcher_bar.visible = true
 	_refresh_ui()
 
 func _show_placement_banner():
@@ -2690,81 +3163,147 @@ func _show_placement_banner():
 		placement_hud_banner = PanelContainer.new()
 		placement_hud_banner.name = "PlacementHUD"
 		var sb = StyleBoxFlat.new()
-		sb.bg_color = Color(0.12, 0.08, 0.04, 0.94)
+		sb.bg_color = Color(0.12, 0.08, 0.04, 0.96)
 		sb.set_border_width_all(2)
 		sb.border_color = Color(0.85, 0.70, 0.35, 1.0)
-		sb.set_corner_radius_all(10)
-		sb.content_margin_left = 18
-		sb.content_margin_right = 18
-		sb.content_margin_top = 8
-		sb.content_margin_bottom = 8
+		sb.set_corner_radius_all(12)
+		sb.content_margin_left = 12 if mobile_ui else 18
+		sb.content_margin_right = 12 if mobile_ui else 18
+		sb.content_margin_top = 10
+		sb.content_margin_bottom = 10
 		placement_hud_banner.add_theme_stylebox_override("panel", sb)
 		
-		var hbox = HBoxContainer.new()
-		hbox.add_theme_constant_override("separation", 16)
-		placement_hud_banner.add_child(hbox)
+		var vbox = VBoxContainer.new()
+		vbox.add_theme_constant_override("separation", 8)
+		placement_hud_banner.add_child(vbox)
 		
 		placement_status_label = Label.new()
-		placement_status_label.text = "Select a clear 2x2 grass area to place building"
-		placement_status_label.add_theme_font_size_override("font_size", 14)
+		placement_status_label.text = "Drag or tap to move building (2x2)"
+		placement_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		placement_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		placement_status_label.add_theme_font_size_override("font_size", 15 if mobile_ui else 14)
 		placement_status_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
-		hbox.add_child(placement_status_label)
+		vbox.add_child(placement_status_label)
+		
+		var controls_row = HBoxContainer.new()
+		controls_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		controls_row.add_theme_constant_override("separation", 6 if mobile_ui else 10)
+		vbox.add_child(controls_row)
+		
+		var nudge_defs = [
+			{"label": "↖", "dx": -1, "dy": 0, "tip": "Move Up-Left"},
+			{"label": "↗", "dx": 0, "dy": -1, "tip": "Move Up-Right"},
+			{"label": "↙", "dx": 0, "dy": 1, "tip": "Move Down-Left"},
+			{"label": "↘", "dx": 1, "dy": 0, "tip": "Move Down-Right"}
+		]
+		for nd in nudge_defs:
+			var nbtn = Button.new()
+			nbtn.text = nd["label"]
+			nbtn.tooltip_text = nd["tip"]
+			nbtn.custom_minimum_size = Vector2(44, 48) if mobile_ui else Vector2(40, 38)
+			var ndx = int(nd["dx"])
+			var ndy = int(nd["dy"])
+			nbtn.pressed.connect(func(): _nudge_placement_ghost(ndx, ndy))
+			controls_row.add_child(nbtn)
+		
+		placement_confirm_btn = Button.new()
+		placement_confirm_btn.name = "ConfirmPlaceBtn"
+		placement_confirm_btn.text = "Place Here"
+		placement_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL if mobile_ui else Control.SIZE_SHRINK_CENTER
+		placement_confirm_btn.custom_minimum_size = Vector2(104, 48) if mobile_ui else Vector2(130, 38)
+		var sb_ok = StyleBoxFlat.new()
+		sb_ok.bg_color = Color(0.20, 0.46, 0.20, 0.96)
+		sb_ok.set_border_width_all(2)
+		sb_ok.border_color = Color(0.80, 1.0, 0.50, 1.0)
+		sb_ok.set_corner_radius_all(8)
+		sb_ok.content_margin_left = 10
+		sb_ok.content_margin_right = 10
+		placement_confirm_btn.add_theme_stylebox_override("normal", sb_ok)
+		placement_confirm_btn.add_theme_stylebox_override("hover", sb_ok)
+		placement_confirm_btn.add_theme_stylebox_override("pressed", sb_ok)
+		placement_confirm_btn.pressed.connect(_confirm_building_placement)
+		controls_row.add_child(placement_confirm_btn)
 		
 		var cancel_btn = Button.new()
-		cancel_btn.text = " Cancel Placement "
+		cancel_btn.name = "CancelPlaceBtn"
+		cancel_btn.text = "Cancel"
+		cancel_btn.custom_minimum_size = Vector2(74, 48) if mobile_ui else Vector2(96, 38)
 		cancel_btn.pressed.connect(_stop_placement_mode)
-		hbox.add_child(cancel_btn)
+		controls_row.add_child(cancel_btn)
 		
 		$HUD.add_child(placement_hud_banner)
-		placement_hud_banner.anchor_left = 0.5
-		placement_hud_banner.anchor_right = 0.5
-		placement_hud_banner.anchor_top = 0.0
-		placement_hud_banner.anchor_bottom = 0.0
-		placement_hud_banner.offset_left = -220.0
-		placement_hud_banner.offset_right = 220.0
-		placement_hud_banner.offset_top = 70.0
-		placement_hud_banner.offset_bottom = 115.0
-		placement_hud_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		if mobile_ui:
+			placement_hud_banner.anchor_left = 0.0
+			placement_hud_banner.anchor_right = 1.0
+			placement_hud_banner.anchor_top = 1.0
+			placement_hud_banner.anchor_bottom = 1.0
+			placement_hud_banner.offset_left = 12.0
+			placement_hud_banner.offset_right = -12.0
+			placement_hud_banner.offset_top = -124.0
+			placement_hud_banner.offset_bottom = -12.0
+		else:
+			placement_hud_banner.anchor_left = 0.5
+			placement_hud_banner.anchor_right = 0.5
+			placement_hud_banner.anchor_top = 1.0
+			placement_hud_banner.anchor_bottom = 1.0
+			placement_hud_banner.offset_left = -290.0
+			placement_hud_banner.offset_right = 290.0
+			placement_hud_banner.offset_top = -108.0
+			placement_hud_banner.offset_bottom = -16.0
+			placement_hud_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	
-	var b_name = GameState.buildings.get(placing_building_id, {}).get("name", "Building")
-	placement_status_label.text = "Placing %s (2x2): Tap clear grass" % b_name
 	placement_hud_banner.visible = true
 
 func _update_placement_ghost_pos():
 	if not is_placing_building or placement_ghost_node == null:
 		return
-	var local_pos = plots_root.get_local_mouse_position()
-	var origin_x = 0.0
-	var origin_y = -60.0
-	var dx = local_pos.x - origin_x
-	var dy = local_pos.y - origin_y
-	var gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
-	var gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
-	gx = clamp(gx, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
-	gy = clamp(gy, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	var gx = clampi(placement_gx, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	var gy = clampi(placement_gy, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	placement_gx = gx
+	placement_gy = gy
 	
-	var iso_x = origin_x + (gx - gy) * (ISO_W * 0.5)
-	var iso_y = origin_y + (gx + gy) * (ISO_H * 0.5)
-	placement_ghost_node.position = Vector2(iso_x, iso_y)
+	placement_ghost_node.position = _grid_to_local_pos(gx, gy)
+	
+	for dy in range(2):
+		for dx in range(2):
+			var poly = placement_ghost_node.get_node_or_null("Footprint_%d_%d" % [dx, dy]) as Polygon2D
+			if poly:
+				var sub_ok = _is_single_tile_clear_for_building(placing_building_id, GameState.current_sector_coord, gx + dx, gy + dy)
+				poly.color = Color(0.35, 0.95, 0.35, 0.45) if sub_ok else Color(1.0, 0.30, 0.30, 0.50)
 	
 	var valid = GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
 	var spr = placement_ghost_node.get_node("GhostSprite") as Sprite2D
 	var badge = placement_ghost_node.get_node("GhostBadge") as Label
+	var b_name = GameState.buildings.get(placing_building_id, {}).get("name", "Building")
 	if valid:
-		spr.modulate = Color(0.6, 1.0, 0.6, 0.8)
-		badge.text = "[Tap Plot to Place 2x2]"
-		badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+		spr.modulate = Color(0.7, 1.0, 0.7, 0.88)
+		badge.text = "[Tap Here or 'Place Here' to Build]" if mobile_ui else "[Tap Plot or 'Place Here' to Build]"
+		badge.modulate = Color(0.75, 1.0, 0.75, 1.0)
+		if placement_status_label:
+			placement_status_label.text = "%s (2x2): Drag/tap to move • Tap 'Place Here'" % b_name
+			placement_status_label.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75, 1.0))
+		if placement_confirm_btn:
+			placement_confirm_btn.disabled = false
+			placement_confirm_btn.text = "Place Here"
 	else:
-		spr.modulate = Color(1.0, 0.5, 0.5, 0.8)
-		badge.text = "[Blocked - Needs 2x2 Clear Space]"
-		badge.modulate = Color(1.0, 0.6, 0.6, 1.0)
+		spr.modulate = Color(1.0, 0.5, 0.5, 0.82)
+		badge.text = "[Blocked - Drag to Clear 2x2 Grass]"
+		badge.modulate = Color(1.0, 0.65, 0.65, 1.0)
+		if placement_status_label:
+			placement_status_label.text = "Blocked (2x2) — Drag %s or tap clear grass" % b_name
+			placement_status_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.55, 1.0))
+		if placement_confirm_btn:
+			placement_confirm_btn.disabled = true
+			placement_confirm_btn.text = "Blocked"
 
 func _handle_building_placement_click(idx: int):
 	if idx < 0 or idx >= GameData.farm_coordinates.size():
 		return
 	var pos = GameData.farm_coordinates[idx]
-	var gx = clamp(pos.x, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
-	var gy = clamp(pos.y, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	var gx = clampi(pos.x, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	var gy = clampi(pos.y, GameData.MEADOW_MIN, GameData.MEADOW_MAX - 1)
+	placement_gx = gx
+	placement_gy = gy
 	
 	if GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy):
 		GameState.place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
@@ -2772,4 +3311,6 @@ func _handle_building_placement_click(idx: int):
 		_stop_placement_mode()
 		_show_message("%s placed and locked to the grid!" % b_name, true)
 	else:
-		_show_message("Cannot place here! Needs clear grass or empty soil without obstacles.", false)
+		_update_placement_ghost_pos()
+		_show_message("Cannot place here! Move to a clear 2x2 grass or empty soil area.", false)
+

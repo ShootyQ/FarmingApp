@@ -70,23 +70,23 @@ func run():
 	# Existing crop durations are saved per tile; future plants use the new table.
 	for crop in specs:
 		for rare in [false,true]:
-			state.tiles_become_soil(state.sector_tiles["1,1"][5])
+			state.tiles_become_soil(state.sector_tiles["1,1"][6])
 			state.seed_inventory[crop] = 1
 			state.selected_crop = crop
 			state.barn_inventory = []
-			state.interact_with_tile("1,1",5)
-			check(state.sector_tiles["1,1"][5]["grow_duration"] == specs[crop][2], "New crop duration")
-			state.sector_tiles["1,1"][5]["is_mutated"] = rare
-			state.sector_tiles["1,1"][5]["plant_time"] -= specs[crop][2] + 1
+			state.interact_with_tile("1,1",6)
+			check(state.sector_tiles["1,1"][6]["grow_duration"] == specs[crop][2], "New crop duration")
+			state.sector_tiles["1,1"][6]["is_mutated"] = rare
+			state.sector_tiles["1,1"][6]["plant_time"] -= specs[crop][2] + 1
 			state.update_crop_timers()
-			state.interact_with_tile("1,1",5)
+			state.interact_with_tile("1,1",6)
 			var before: int = state.coins
 			check(state.sell_all_from_barn() == specs[crop][1] * (2 if rare else 1), "Actual normal/rare market payout")
-			check(state.coins == before + specs[crop][1] * (2 if rare else 1) and state.sector_tiles["1,1"][5]["state"] == "empty", "Harvest leaves permanent soil")
-	state.sector_tiles["1,1"][5].merge({"state":"growing","crop":"wheat","is_mutated":false,"plant_time":Time.get_unix_time_from_system()-6,"grow_duration":5},true)
+			check(state.coins == before + specs[crop][1] * (2 if rare else 1) and state.sector_tiles["1,1"][6]["state"] == "empty", "Harvest leaves permanent soil")
+	state.sector_tiles["1,1"][6].merge({"state":"growing","crop":"wheat","is_mutated":false,"plant_time":Time.get_unix_time_from_system()-6,"grow_duration":5},true)
 	state.save_game()
 	state.load_game()
-	check(state.sector_tiles["1,1"][5]["state"] == "ready" and state.sector_tiles["1,1"][5]["grow_duration"] == 5, "Legacy five-second crop finishes unchanged")
+	check(state.sector_tiles["1,1"][6]["state"] == "ready" and state.sector_tiles["1,1"][6]["grow_duration"] == 5, "Legacy five-second crop finishes unchanged")
 	# Respawns respect caps, timestamps, and occupied land, including offline catch-up.
 	var tiles: Array = []
 	for i in range(400): tiles.append({"type":"grass"})
@@ -122,12 +122,12 @@ func run():
 	state.coins = 2497
 	state.tool_tier = 2
 	state.barn_inventory = [{"id":"wheat","name":"Wheat","count":3}]
-	state.sector_tiles["1,1"][1] = {"type":"preparing","prepare_started_at":now,"prepare_duration":300}
+	state.sector_tiles["1,1"][8] = {"type":"preparing","prepare_started_at":now,"prepare_duration":300}
 	state.resource_last_tick["1,1"] = now
 	check(state.save_game() and state.start_new_farm(), "Restart backs up before writing a fresh farm")
 	check(state.coins == 150 and state.tool_tier == 0 and state.get_preparation_count() == 0 and state.seed_inventory["wheat"] == 8, "Confirmed restart resets only to the new starter package")
 	check(state.restore_previous_farm(), "Backup restores")
-	check(state.coins == 2497 and state.tool_tier == 2 and state.barn_inventory[0]["count"] == 3 and absf(float(state.sector_tiles["1,1"][1]["prepare_started_at"]) - now) < 0.001, "Restore preserves wealth, inventory and job timestamps")
+	check(state.coins == 2497 and state.tool_tier == 2 and state.barn_inventory[0]["count"] == 3 and absf(float(state.sector_tiles["1,1"][8]["prepare_started_at"]) - now) < 0.001, "Restore preserves wealth, inventory and job timestamps")
 	var failed_script = GDScript.new()
 	failed_script.source_code = 'extends "res://scripts/game_state.gd"\nfunc _write_save_data(path: String, data: Dictionary) -> bool:\n\tif path == BACKUP_PATH: return false\n\treturn super._write_save_data(path, data)\n'
 	check(failed_script.reload() == OK, "Backup-failure fixture compiles after autoload")
