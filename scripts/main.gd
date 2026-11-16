@@ -513,8 +513,45 @@ func _setup_zoom_controls():
 			var factor = 1.2 if caption == "+" else 1.0 / 1.2
 			button.pressed.connect(func(): _zoom_at(camera.zoom.x * factor, get_viewport_rect().size * 0.5))
 
+func _get_building_at_local_pos(local_pos: Vector2) -> String:
+	var building_keys = ["workshop", "barn"]
+	for b_id in building_keys:
+		var b_data = GameState.buildings.get(b_id, {})
+		if not b_data.get("placed", false):
+			continue
+		var bgx = int(b_data.get("gx", 0))
+		var bgy = int(b_data.get("gy", 0))
+		var origin_x = 0.0
+		var origin_y = -60.0
+		
+		# Center of the 2x2 base in plots_root local space
+		var base_cx = (bgx - bgy) * (ISO_W / 2.0) + origin_x
+		var base_cy = (bgx + bgy + 1.0) * (ISO_H / 2.0) + origin_y
+		
+		# Check building visual bounding box (tall structure extending upwards)
+		if local_pos.x >= (base_cx - 135.0) and local_pos.x <= (base_cx + 135.0) and \
+		   local_pos.y >= (base_cy - 250.0) and local_pos.y <= (base_cy + 35.0):
+			var dx = local_pos.x - origin_x
+			var dy = local_pos.y - origin_y
+			var tap_gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
+			var tap_gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
+			if tap_gx >= (bgx - 2) and tap_gx <= (bgx + 1) and tap_gy >= (bgy - 2) and tap_gy <= (bgy + 1):
+				return b_id
+	return ""
+
 func _handle_isometric_click(screen_position: Vector2):
 	var local_pos = plots_root.get_global_transform_with_canvas().affine_inverse() * screen_position
+	
+	if not is_placing_building:
+		# Check if clicked directly on placed building visual bounds
+		var clicked_building = _get_building_at_local_pos(local_pos)
+		if clicked_building == "barn":
+			_open_barn_modal()
+			return
+		elif clicked_building == "workshop":
+			_open_workshop_modal()
+			return
+		
 	var origin_x = 0.0
 	var origin_y = -60.0
 	
@@ -1002,6 +1039,8 @@ func _render_plot(idx: int):
 	var gx = pos.x
 	var gy = pos.y
 	
+	node.z_index = gx + gy - 2 * GameData.MEADOW_MIN
+	
 	var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
 	if idx >= tiles.size():
 		soil_sprite.visible = false
@@ -1024,7 +1063,7 @@ func _render_plot(idx: int):
 					obj_sprite.scale = Vector2(0.38, 0.38)
 					obj_sprite.offset = Vector2(0, -320)
 					obj_sprite.modulate = Color.WHITE
-					node.z_index = (gx + gy + 2) * 2
+					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
 					badge.position = Vector2(-75, -170)
 					badge.text = "Carpenter's Workshop"
 					badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
@@ -1033,7 +1072,7 @@ func _render_plot(idx: int):
 					obj_sprite.scale = Vector2(1.15, 1.15)
 					obj_sprite.offset = Vector2(0, -104)
 					obj_sprite.modulate = Color.WHITE
-					node.z_index = (gx + gy + 2) * 2
+					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
 					badge.position = Vector2(-70, -165)
 					badge.text = "Red Barn [Storage]"
 					badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
@@ -1049,6 +1088,7 @@ func _render_plot(idx: int):
 			obj_sprite.scale = Vector2(1.15, 1.15)
 			obj_sprite.offset = Vector2(0, -104)
 			obj_sprite.modulate = Color.WHITE
+			node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
 			badge.position = Vector2(-70, -165)
 			badge.text = "Red Barn [Storage]"
 			badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
@@ -2359,7 +2399,7 @@ func _refresh_workshop_blueprint_modal():
 	if wp_construct_btn:
 		wp_construct_btn.disabled = not can_build
 		if can_build:
-			wp_construct_btn.text = "🔨 Construct & Place Workshop (Ready!)"
+			wp_construct_btn.text = "Construct & Place Workshop (Ready!)"
 			var sb_ready = StyleBoxFlat.new()
 			sb_ready.bg_color = Color(0.20, 0.45, 0.20, 0.95)
 			sb_ready.set_border_width_all(2)
@@ -2549,7 +2589,7 @@ func _update_workshop_button_text():
 		return
 	if not GameState.workshop_unlocked:
 		if GameState.can_build_workshop():
-			workshop_btn.text = "🔨 Build Workshop!"
+			workshop_btn.text = "Build Workshop!"
 			var sb_glow = StyleBoxFlat.new()
 			sb_glow.bg_color = Color(0.24, 0.38, 0.16, 0.95)
 			sb_glow.set_border_width_all(2)

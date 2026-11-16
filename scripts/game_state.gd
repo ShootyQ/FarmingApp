@@ -678,7 +678,7 @@ func _valid_backup(data: Variant) -> bool:
 		if typeof(tiles) != TYPE_ARRAY or tiles.size() < 16:
 			return false
 		for tile in tiles:
-			if typeof(tile) != TYPE_DICTIONARY or tile.get("type", "") not in ["soil", "grass", "obstacle", "barn", "preparing"]:
+			if typeof(tile) != TYPE_DICTIONARY or tile.get("type", "") not in ["soil", "grass", "obstacle", "barn", "building", "preparing"]:
 				return false
 	return true
 
@@ -754,18 +754,23 @@ func _apply_save_data(parsed: Dictionary):
 	if parsed.has("buildings") and typeof(parsed["buildings"]) == TYPE_DICTIONARY:
 		buildings = parsed["buildings"]
 	
-	# Ensure Homestead has 2x2 Red Barn footprint at (0,0) -> tiles 0, 1, 4, 5
-	var h_tiles = sector_tiles.get("1,1", [])
-	if h_tiles.size() >= 16:
+	# Ensure 2x2 Red Barn footprint is marked at its saved coordinates
+	var barn_data = buildings.get("barn", {})
+	var barn_gx = int(barn_data.get("gx", 0))
+	var barn_gy = int(barn_data.get("gy", 0))
+	var barn_sec = barn_data.get("sector", "1,1")
+	var barn_tiles = sector_tiles.get(barn_sec, [])
+	var barn_origin_idx = GameData.get_farm_index(Vector2i(barn_gx, barn_gy))
+	if barn_tiles.size() >= 16:
 		for dy in range(2):
 			for dx in range(2):
-				var idx = GameData.get_farm_index(Vector2i(dx, dy))
-				if idx >= 0 and idx < h_tiles.size():
-					h_tiles[idx] = {
+				var idx = GameData.get_farm_index(Vector2i(barn_gx + dx, barn_gy + dy))
+				if idx >= 0 and idx < barn_tiles.size():
+					barn_tiles[idx] = {
 						"type": "building",
 						"building_id": "barn",
 						"is_origin": (dx == 0 and dy == 0),
-						"origin_idx": 0
+						"origin_idx": barn_origin_idx
 					}
 	
 	# If workshop was placed, verify its tiles are marked
