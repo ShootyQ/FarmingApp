@@ -133,6 +133,34 @@ var wp_construct_btn: Button
 var wp_hint_lbl: Label
 var dev_unlock_btn: Button
 
+# Buildings & Placeable Decorations Textures
+var tex_mill = preload("res://assets/objects/mill.png")
+var tex_bakery = preload("res://assets/objects/bakery.png")
+var tex_fence = preload("res://assets/objects/wooden_fence.png")
+var tex_well = preload("res://assets/objects/stone_well.png")
+var tex_lantern = preload("res://assets/objects/lantern_post.png")
+var tex_planter = preload("res://assets/objects/planter_box.png")
+
+# Mill Modal
+var mill_modal: Control
+var mill_title_label: Label
+var mill_info_label: Label
+var mill_progress_bar: ProgressBar
+var mill_action_btn: Button
+var mill_move_btn: Button
+
+# Bakery Modal
+var bakery_modal: Control
+var bakery_title_label: Label
+var bakery_info_label: Label
+var bakery_progress_bar: ProgressBar
+var bakery_action_btn: Button
+var bakery_move_btn: Button
+
+# Barn Place in World Button
+var barn_place_btn: Button
+var barn_selected_slot_idx: int = -1
+
 # Mode Switcher (Planting vs Tools)
 var mode_switcher_bar: PanelContainer = null
 var mode_plant_btn: Button = null
@@ -141,7 +169,7 @@ var dock_normal_wood_sb: StyleBoxFlat = null
 var dock_hover_wood_sb: StyleBoxFlat = null
 var dock_active_gold_sb: StyleBoxFlat = null
 
-# Building Placement Mode (2x2 Grid Footprints)
+# Building & Decoration Placement Mode
 var is_placing_building: bool = false
 var placing_building_id: String = ""
 var placement_ghost_node: Node2D = null
@@ -213,6 +241,8 @@ func _ready():
 	_build_barn_modal()
 	_build_workshop_modal()
 	_build_workshop_blueprint_modal()
+	_build_mill_modal()
+	_build_bakery_modal()
 	_setup_map_buttons()
 	tool_menu = preload("res://scripts/tool_menu.gd").new()
 	$HUD.add_child(tool_menu)
@@ -233,6 +263,9 @@ func _ready():
 	GameState.barn_updated.connect(_refresh_market_modal)
 	GameState.workshop_opened.connect(_open_workshop_modal)
 	GameState.workshop_unlocked_signal.connect(_on_workshop_unlocked)
+	GameState.mill_opened.connect(_open_mill_modal)
+	GameState.bakery_opened.connect(_open_bakery_modal)
+	GameState.production_updated.connect(_on_production_updated)
 	GameState.buildings_updated.connect(_refresh_ui)
 	
 	var make_wood_small_sb = func() -> StyleBoxFlat:
@@ -404,8 +437,12 @@ func _setup_mobile_hud():
 	for slot in barn_slots_container.get_children():
 		slot.custom_minimum_size = Vector2(112, 112)
 	barn_detail_label.reparent(column)
-	barn_detail_label.custom_minimum_size = Vector2(0, 96)
+	barn_detail_label.custom_minimum_size = Vector2(0, 70)
 	barn_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if barn_place_btn:
+		barn_place_btn.reparent(column)
+		barn_place_btn.custom_minimum_size = Vector2(0, 48)
+		barn_place_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	frame.queue_free()
 
 func _process(delta: float):
@@ -438,6 +475,10 @@ func _process(delta: float):
 	_update_active_crop_labels()
 	if tool_menu and tool_menu.visible:
 		tool_menu.refresh_preparation()
+	if mill_modal and mill_modal.visible:
+		_refresh_mill_modal()
+	if bakery_modal and bakery_modal.visible:
+		_refresh_bakery_modal()
 
 func _on_farm_replaced():
 	_close_farm_menus()
@@ -449,7 +490,7 @@ func _on_farm_replaced():
 	_refresh_ui()
 
 func _farm_modal_open() -> bool:
-	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible) or (workshop_modal and workshop_modal.visible) or (workshop_blueprint_modal and workshop_blueprint_modal.visible)
+	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible) or (workshop_modal and workshop_modal.visible) or (workshop_blueprint_modal and workshop_blueprint_modal.visible) or (mill_modal and mill_modal.visible) or (bakery_modal and bakery_modal.visible)
 
 func _input(event: InputEvent):
 	# Finish tracked touches even when released over a HUD button.
@@ -626,7 +667,7 @@ func _setup_zoom_controls():
 			button.pressed.connect(func(): _zoom_at(camera.zoom.x * factor, get_viewport_rect().size * 0.5))
 
 func _get_building_at_local_pos(local_pos: Vector2) -> String:
-	var building_keys = ["workshop", "barn"]
+	var building_keys = ["workshop", "barn", "mill", "bakery"]
 	for b_id in building_keys:
 		var b_data = GameState.buildings.get(b_id, {})
 		if not b_data.get("placed", false):
@@ -662,6 +703,12 @@ func _handle_isometric_click(screen_position: Vector2):
 			return
 		elif clicked_building == "workshop":
 			_open_workshop_modal()
+			return
+		elif clicked_building == "mill":
+			_open_mill_modal()
+			return
+		elif clicked_building == "bakery":
+			_open_bakery_modal()
 			return
 		
 	var origin_x = 0.0
@@ -1075,7 +1122,7 @@ func _on_plot_clicked(idx: int):
 	_render_plot(idx)
 
 func _close_farm_menus():
-	for modal in [map_modal, seed_modal, market_modal, barn_modal, workshop_modal, workshop_blueprint_modal, tool_menu]:
+	for modal in [map_modal, seed_modal, market_modal, barn_modal, workshop_modal, workshop_blueprint_modal, mill_modal, bakery_modal, tool_menu]:
 		if modal:
 			modal.visible = false
 	is_dragging = false
@@ -1333,6 +1380,42 @@ func _render_plot(idx: int):
 					badge.position = Vector2(-75, -170)
 					badge.text = "Carpenter's Workshop"
 					badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
+				elif b_id == "mill":
+					obj_sprite.texture = tex_mill
+					obj_sprite.scale = Vector2(0.40, 0.40)
+					obj_sprite.offset = Vector2(0, -320)
+					obj_sprite.modulate = Color.WHITE
+					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+					badge.position = Vector2(-75, -170)
+					var m_b = GameState.buildings.get("mill", {})
+					if m_b.get("output_ready", 0) > 0:
+						badge.text = "Mill [Flour Ready!]"
+						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+					elif m_b.get("is_processing", false):
+						var left = max(0.0, float(m_b.get("process_started_at", 0)) + float(m_b.get("process_duration", 300)) - Time.get_unix_time_from_system())
+						badge.text = "Milling (%s)" % GameData.format_time(left)
+						badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+					else:
+						badge.text = "Windmill [Idle]"
+						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
+				elif b_id == "bakery":
+					obj_sprite.texture = tex_bakery
+					obj_sprite.scale = Vector2(0.38, 0.38)
+					obj_sprite.offset = Vector2(0, -300)
+					obj_sprite.modulate = Color.WHITE
+					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+					badge.position = Vector2(-75, -170)
+					var bk_b = GameState.buildings.get("bakery", {})
+					if bk_b.get("output_ready", 0) > 0:
+						badge.text = "Bakery [Bread Ready!]"
+						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+					elif bk_b.get("is_processing", false):
+						var left = max(0.0, float(bk_b.get("process_started_at", 0)) + float(bk_b.get("process_duration", 600)) - Time.get_unix_time_from_system())
+						badge.text = "Baking (%s)" % GameData.format_time(left)
+						badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+					else:
+						badge.text = "Artisan Bakery [Idle]"
+						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
 				else: # barn
 					obj_sprite.texture = tex_barn
 					obj_sprite.scale = Vector2(1.15, 1.15)
@@ -1346,6 +1429,38 @@ func _render_plot(idx: int):
 				soil_sprite.visible = false
 				obj_sprite.visible = false
 				badge.text = ""
+		
+		"decoration":
+			soil_sprite.visible = false
+			obj_sprite.visible = true
+			var d_id = tile.get("item_id", "")
+			match d_id:
+				"wooden_fence":
+					obj_sprite.texture = tex_fence
+					obj_sprite.scale = Vector2(0.65, 0.65)
+					obj_sprite.offset = Vector2(0, -60)
+					badge.text = "Picket Fence"
+				"stone_well":
+					obj_sprite.texture = tex_well
+					obj_sprite.scale = Vector2(0.65, 0.65)
+					obj_sprite.offset = Vector2(0, -80)
+					badge.text = "Well (+15% Grow)"
+				"lantern_post":
+					obj_sprite.texture = tex_lantern
+					obj_sprite.scale = Vector2(0.65, 0.65)
+					obj_sprite.offset = Vector2(0, -100)
+					badge.text = "Lantern"
+				"planter_box":
+					obj_sprite.texture = tex_planter
+					obj_sprite.scale = Vector2(0.65, 0.65)
+					obj_sprite.offset = Vector2(0, -60)
+					badge.text = "Planters"
+				_:
+					obj_sprite.texture = tex_fence
+					badge.text = "Decor"
+			obj_sprite.modulate = Color.WHITE
+			badge.position = Vector2(-50, -130)
+			badge.modulate = Color(0.9, 0.95, 1.0, 0.95)
 		
 		"barn":
 			soil_sprite.visible = false
@@ -1564,6 +1679,22 @@ func _update_active_crop_labels():
 						else:
 							if obj_sprite.texture != tex_pumpkin_vine:
 								obj_sprite.texture = tex_pumpkin_vine
+		elif tile.get("type") == "building" and tile.get("is_origin", false):
+			var b_id = tile.get("building_id", "")
+			if b_id in ["mill", "bakery"]:
+				var node = plot_nodes[i]
+				var badge = node.get_node("Badge") as Label
+				var b_data = GameState.buildings.get(b_id, {})
+				if b_data.get("output_ready", 0) > 0:
+					badge.text = ("Mill [Flour Ready!]" if b_id == "mill" else "Bakery [Bread Ready!]")
+					badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+				elif b_data.get("is_processing", false):
+					var left = max(0.0, float(b_data.get("process_started_at", 0)) + float(b_data.get("process_duration", 300.0 if b_id == "mill" else 600.0)) - now)
+					badge.text = ("Milling (%s)" if b_id == "mill" else "Baking (%s)") % GameData.format_time(left)
+					badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+				else:
+					badge.text = ("Windmill [Idle]" if b_id == "mill" else "Artisan Bakery [Idle]")
+					badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
 
 func _refresh_map_grid():
 	var idx = 0
@@ -1750,7 +1881,7 @@ func _build_barn_modal():
 		
 	# Item detail inspection box (bottom)
 	barn_detail_label = Label.new()
-	barn_detail_label.position = Vector2(100, 475)
+	barn_detail_label.position = Vector2(100, 470)
 	barn_detail_label.size = Vector2(660, 48)
 	barn_detail_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	barn_detail_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -1761,6 +1892,29 @@ func _build_barn_modal():
 	barn_detail_label.add_theme_constant_override("shadow_offset_x", 1)
 	barn_detail_label.add_theme_constant_override("shadow_offset_y", 1)
 	frame.add_child(barn_detail_label)
+	
+	barn_place_btn = Button.new()
+	barn_place_btn.name = "BarnPlaceBtn"
+	barn_place_btn.text = "Place in World"
+	barn_place_btn.position = Vector2(330, 525)
+	barn_place_btn.size = Vector2(200, 36)
+	barn_place_btn.visible = false
+	var place_sb = StyleBoxFlat.new()
+	place_sb.bg_color = Color(0.18, 0.45, 0.22, 0.95)
+	place_sb.set_border_width_all(2)
+	place_sb.border_color = Color(0.75, 1.0, 0.55, 1.0)
+	place_sb.set_corner_radius_all(8)
+	barn_place_btn.add_theme_stylebox_override("normal", place_sb)
+	barn_place_btn.add_theme_stylebox_override("hover", place_sb)
+	barn_place_btn.add_theme_stylebox_override("pressed", place_sb)
+	barn_place_btn.pressed.connect(func():
+		if barn_selected_slot_idx >= 0 and barn_selected_slot_idx < GameState.barn_inventory.size():
+			var item = GameState.barn_inventory[barn_selected_slot_idx]
+			if item.get("id", "") in GameState.PLACEABLE_DECORATIONS:
+				barn_modal.visible = false
+				_start_placement_mode(item["id"])
+	)
+	frame.add_child(barn_place_btn)
 
 func _open_barn_modal():
 	_close_farm_menus()
@@ -1772,6 +1926,10 @@ func _refresh_barn_modal():
 		return
 	var count = GameState.get_barn_used_slots()
 	barn_title_label.text = "RED BARN STORAGE (%d / %d Slots)" % [count, GameState.barn_slots_max]
+	if barn_selected_slot_idx >= GameState.barn_inventory.size():
+		barn_selected_slot_idx = -1
+		if barn_place_btn:
+			barn_place_btn.visible = false
 	
 	# Dynamically support up to 15 slots if barn was expanded in workshop
 	while barn_slots_container.get_child_count() < GameState.barn_slots_max:
@@ -1857,14 +2015,23 @@ func _refresh_barn_modal():
 			name_lbl.add_theme_color_override("font_color", Color(0.65, 0.55, 0.45, 0.5))
 
 func _on_barn_slot_clicked(slot_idx: int):
+	barn_selected_slot_idx = slot_idx
 	if slot_idx < GameState.barn_inventory.size():
 		var item = GameState.barn_inventory[slot_idx]
 		var info = GameData.get_item_info(item["id"])
 		barn_detail_label.text = "%s (x%d in stock) • Sell Value: %dc each\n\"%s\"" % [
 			info["name"], item["count"], info["sell_value"], info["desc"]
 		]
+		if barn_place_btn:
+			if item["id"] in GameState.PLACEABLE_DECORATIONS:
+				barn_place_btn.visible = true
+				barn_place_btn.text = "Place %s on Farm" % info["name"]
+			else:
+				barn_place_btn.visible = false
 	else:
 		barn_detail_label.text = "Empty Storage Slot (%d of %d) • Harvested crops are stored here automatically!" % [slot_idx + 1, GameState.barn_slots_max]
+		if barn_place_btn:
+			barn_place_btn.visible = false
 
 # Seed Pouch & Nursery Merchant Modal
 func _build_seed_modal():
@@ -2409,7 +2576,7 @@ func _build_workshop_modal():
 		tabs_hbox.add_theme_constant_override("separation", 6)
 		vbox.add_child(tabs_hbox)
 		
-		for cat in ["All", "Decor", "Farmstead", "Refining"]:
+		for cat in ["All", "Buildings", "Decor", "Farmstead", "Refining"]:
 			var tab_btn = Button.new()
 			tab_btn.text = cat
 			tab_btn.name = "Tab_" + cat
@@ -2522,7 +2689,7 @@ func _build_workshop_modal():
 	tabs_hbox.add_theme_constant_override("separation", 10)
 	backing.add_child(tabs_hbox)
 	
-	var categories = ["All", "Decor", "Farmstead", "Refining"]
+	var categories = ["All", "Buildings", "Decor", "Farmstead", "Refining"]
 	for cat in categories:
 		var tab_btn = Button.new()
 		tab_btn.text = " %s " % cat
@@ -2913,11 +3080,23 @@ func _refresh_workshop_modal():
 		var already_crafted = is_unique and GameState.crafted_recipes.get(r_id, 0) > 0
 		
 		if already_crafted:
-			var built_lbl = Label.new()
-			built_lbl.text = "[ Built / Active ]"
-			built_lbl.add_theme_font_size_override("font_size", 13)
-			built_lbl.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5, 0.9))
-			h.add_child(built_lbl)
+			if r_id in ["mill", "bakery"]:
+				var move_btn = Button.new()
+				var is_pl = GameState.buildings.get(r_id, {}).get("placed", false)
+				move_btn.text = " Move %s " % r.get("name", "Building") if is_pl else " Place %s " % r.get("name", "Building")
+				move_btn.custom_minimum_size.y = 48 if mobile_ui else 0
+				var rec_id = r_id
+				move_btn.pressed.connect(func():
+					workshop_modal.visible = false
+					_start_placement_mode(rec_id)
+				)
+				h.add_child(move_btn)
+			else:
+				var built_lbl = Label.new()
+				built_lbl.text = "[ Built / Active ]"
+				built_lbl.add_theme_font_size_override("font_size", 13)
+				built_lbl.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5, 0.9))
+				h.add_child(built_lbl)
 		else:
 			var craft_btn = Button.new()
 			var y_count = r.get("yield_count", 1)
@@ -2926,8 +3105,11 @@ func _refresh_workshop_modal():
 			craft_btn.disabled = not can_craft
 			var rec_id = r_id
 			craft_btn.pressed.connect(func():
-				GameState.craft_recipe(rec_id)
+				var success = GameState.craft_recipe(rec_id)
 				_refresh_workshop_modal()
+				if success and (rec_id == "mill" or rec_id == "bakery"):
+					workshop_modal.visible = false
+					_start_placement_mode(rec_id)
 			)
 			h.add_child(craft_btn)
 		
@@ -3012,6 +3194,14 @@ func _grid_to_local_pos(gx: int, gy: int) -> Vector2:
 
 func _is_local_pos_on_placement_ghost(local_pos: Vector2) -> bool:
 	var g = _local_pos_to_grid(local_pos)
+	if placing_building_id in GameState.PLACEABLE_DECORATIONS:
+		if g.x == placement_gx and g.y == placement_gy:
+			return true
+		var base_cx = (placement_gx - placement_gy) * (ISO_W * 0.5)
+		var base_cy = (placement_gx + placement_gy + 0.5) * (ISO_H * 0.5) - 60.0
+		return local_pos.x >= (base_cx - 70.0) and local_pos.x <= (base_cx + 70.0) and \
+		       local_pos.y >= (base_cy - 120.0) and local_pos.y <= (base_cy + 30.0)
+	
 	if g.x >= placement_gx and g.x <= placement_gx + 1 and g.y >= placement_gy and g.y <= placement_gy + 1:
 		return true
 	var base_cx = (placement_gx - placement_gy) * (ISO_W * 0.5)
@@ -3035,6 +3225,24 @@ func _is_single_tile_clear_for_building(building_id: String, sector_coord: Strin
 	return false
 
 func _find_initial_placement_coords(building_id: String) -> Vector2i:
+	if building_id in GameState.PLACEABLE_DECORATIONS:
+		var decor_prefs: Array[Vector2i] = [
+			Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1),
+			Vector2i(2, 0), Vector2i(0, 2), Vector2i(2, 1), Vector2i(1, 2)
+		]
+		for cand in decor_prefs:
+			if GameState.can_place_decoration(building_id, GameState.current_sector_coord, cand.x, cand.y):
+				return cand
+		for gy in range(4):
+			for gx in range(4):
+				if GameState.can_place_decoration(building_id, GameState.current_sector_coord, gx, gy):
+					return Vector2i(gx, gy)
+		for gy in range(GameData.MEADOW_MIN, GameData.MEADOW_MAX):
+			for gx in range(GameData.MEADOW_MIN, GameData.MEADOW_MAX):
+				if GameState.can_place_decoration(building_id, GameState.current_sector_coord, gx, gy):
+					return Vector2i(gx, gy)
+		return Vector2i(0, 0)
+	
 	var b_data = GameState.buildings.get(building_id, {})
 	if b_data.get("placed", false) and b_data.get("sector", "1,1") == GameState.current_sector_coord:
 		return Vector2i(
@@ -3135,6 +3343,30 @@ func _start_placement_mode(building_id: String):
 		spr.texture = tex_barn
 		spr.scale = Vector2(1.15, 1.15)
 		spr.offset = Vector2(0, -104)
+	elif building_id == "mill":
+		spr.texture = tex_mill
+		spr.scale = Vector2(0.40, 0.40)
+		spr.offset = Vector2(0, -320)
+	elif building_id == "bakery":
+		spr.texture = tex_bakery
+		spr.scale = Vector2(0.38, 0.38)
+		spr.offset = Vector2(0, -300)
+	elif building_id == "wooden_fence":
+		spr.texture = tex_fence
+		spr.scale = Vector2(0.65, 0.65)
+		spr.offset = Vector2(0, -60)
+	elif building_id == "stone_well":
+		spr.texture = tex_well
+		spr.scale = Vector2(0.65, 0.65)
+		spr.offset = Vector2(0, -80)
+	elif building_id == "lantern_post":
+		spr.texture = tex_lantern
+		spr.scale = Vector2(0.65, 0.65)
+		spr.offset = Vector2(0, -100)
+	elif building_id == "planter_box":
+		spr.texture = tex_planter
+		spr.scale = Vector2(0.65, 0.65)
+		spr.offset = Vector2(0, -60)
 	
 	var start_coords = _find_initial_placement_coords(building_id)
 	placement_gx = start_coords.x
@@ -3263,38 +3495,72 @@ func _update_placement_ghost_pos():
 	placement_gy = gy
 	
 	placement_ghost_node.position = _grid_to_local_pos(gx, gy)
-	
-	for dy in range(2):
-		for dx in range(2):
-			var poly = placement_ghost_node.get_node_or_null("Footprint_%d_%d" % [dx, dy]) as Polygon2D
-			if poly:
-				var sub_ok = _is_single_tile_clear_for_building(placing_building_id, GameState.current_sector_coord, gx + dx, gy + dy)
-				poly.color = Color(0.35, 0.95, 0.35, 0.45) if sub_ok else Color(1.0, 0.30, 0.30, 0.50)
-	
-	var valid = GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
 	var spr = placement_ghost_node.get_node("GhostSprite") as Sprite2D
 	var badge = placement_ghost_node.get_node("GhostBadge") as Label
-	var b_name = GameState.buildings.get(placing_building_id, {}).get("name", "Building")
-	if valid:
-		spr.modulate = Color(0.7, 1.0, 0.7, 0.88)
-		badge.text = "[Tap Here or 'Place Here' to Build]" if mobile_ui else "[Tap Plot or 'Place Here' to Build]"
-		badge.modulate = Color(0.75, 1.0, 0.75, 1.0)
-		if placement_status_label:
-			placement_status_label.text = "%s (2x2): Drag/tap to move • Tap 'Place Here'" % b_name
-			placement_status_label.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75, 1.0))
-		if placement_confirm_btn:
-			placement_confirm_btn.disabled = false
-			placement_confirm_btn.text = "Place Here"
+	
+	if placing_building_id in GameState.PLACEABLE_DECORATIONS:
+		for dy in range(2):
+			for dx in range(2):
+				var poly = placement_ghost_node.get_node_or_null("Footprint_%d_%d" % [dx, dy]) as Polygon2D
+				if poly:
+					poly.visible = (dx == 0 and dy == 0)
+		var poly00 = placement_ghost_node.get_node_or_null("Footprint_0_0") as Polygon2D
+		var valid = GameState.can_place_decoration(placing_building_id, GameState.current_sector_coord, gx, gy)
+		if poly00:
+			poly00.color = Color(0.35, 0.95, 0.35, 0.45) if valid else Color(1.0, 0.30, 0.30, 0.50)
+		var item_info = GameData.get_item_info(placing_building_id)
+		var d_name = item_info.get("name", "Decoration")
+		if valid:
+			spr.modulate = Color(0.7, 1.0, 0.7, 0.88)
+			badge.text = "[Tap Here or 'Place Here' to Place]" if mobile_ui else "[Tap Plot or 'Place Here' to Place]"
+			badge.modulate = Color(0.75, 1.0, 0.75, 1.0)
+			if placement_status_label:
+				placement_status_label.text = "%s (1x1): Drag/tap to move • Tap 'Place Here'" % d_name
+				placement_status_label.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75, 1.0))
+			if placement_confirm_btn:
+				placement_confirm_btn.disabled = false
+				placement_confirm_btn.text = "Place Here"
+		else:
+			spr.modulate = Color(1.0, 0.5, 0.5, 0.82)
+			badge.text = "[Blocked - Needs Clear Grass or Plot]"
+			badge.modulate = Color(1.0, 0.65, 0.65, 1.0)
+			if placement_status_label:
+				placement_status_label.text = "Blocked (1x1) — Drag %s or tap clear grass/plot" % d_name
+				placement_status_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.55, 1.0))
+			if placement_confirm_btn:
+				placement_confirm_btn.disabled = true
+				placement_confirm_btn.text = "Blocked"
 	else:
-		spr.modulate = Color(1.0, 0.5, 0.5, 0.82)
-		badge.text = "[Blocked - Drag to Clear 2x2 Grass]"
-		badge.modulate = Color(1.0, 0.65, 0.65, 1.0)
-		if placement_status_label:
-			placement_status_label.text = "Blocked (2x2) — Drag %s or tap clear grass" % b_name
-			placement_status_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.55, 1.0))
-		if placement_confirm_btn:
-			placement_confirm_btn.disabled = true
-			placement_confirm_btn.text = "Blocked"
+		for dy in range(2):
+			for dx in range(2):
+				var poly = placement_ghost_node.get_node_or_null("Footprint_%d_%d" % [dx, dy]) as Polygon2D
+				if poly:
+					poly.visible = true
+					var sub_ok = _is_single_tile_clear_for_building(placing_building_id, GameState.current_sector_coord, gx + dx, gy + dy)
+					poly.color = Color(0.35, 0.95, 0.35, 0.45) if sub_ok else Color(1.0, 0.30, 0.30, 0.50)
+		
+		var valid = GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
+		var b_name = GameState.buildings.get(placing_building_id, {}).get("name", "Building")
+		if valid:
+			spr.modulate = Color(0.7, 1.0, 0.7, 0.88)
+			badge.text = "[Tap Here or 'Place Here' to Build]" if mobile_ui else "[Tap Plot or 'Place Here' to Build]"
+			badge.modulate = Color(0.75, 1.0, 0.75, 1.0)
+			if placement_status_label:
+				placement_status_label.text = "%s (2x2): Drag/tap to move • Tap 'Place Here'" % b_name
+				placement_status_label.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75, 1.0))
+			if placement_confirm_btn:
+				placement_confirm_btn.disabled = false
+				placement_confirm_btn.text = "Place Here"
+		else:
+			spr.modulate = Color(1.0, 0.5, 0.5, 0.82)
+			badge.text = "[Blocked - Drag to Clear 2x2 Grass]"
+			badge.modulate = Color(1.0, 0.65, 0.65, 1.0)
+			if placement_status_label:
+				placement_status_label.text = "Blocked (2x2) — Drag %s or tap clear grass" % b_name
+				placement_status_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.55, 1.0))
+			if placement_confirm_btn:
+				placement_confirm_btn.disabled = true
+				placement_confirm_btn.text = "Blocked"
 
 func _handle_building_placement_click(idx: int):
 	if idx < 0 or idx >= GameData.farm_coordinates.size():
@@ -3305,6 +3571,17 @@ func _handle_building_placement_click(idx: int):
 	placement_gx = gx
 	placement_gy = gy
 	
+	if placing_building_id in GameState.PLACEABLE_DECORATIONS:
+		if GameState.can_place_decoration(placing_building_id, GameState.current_sector_coord, gx, gy):
+			GameState.place_decoration(placing_building_id, GameState.current_sector_coord, gx, gy)
+			var d_name = GameData.get_item_info(placing_building_id)["name"]
+			_stop_placement_mode()
+			_show_message("%s placed on the farm!" % d_name, true)
+		else:
+			_update_placement_ghost_pos()
+			_show_message("Cannot place here! Move to clear grass or an empty plot.", false)
+		return
+	
 	if GameState.can_place_building(placing_building_id, GameState.current_sector_coord, gx, gy):
 		GameState.place_building(placing_building_id, GameState.current_sector_coord, gx, gy)
 		var b_name = GameState.buildings[placing_building_id]["name"]
@@ -3313,4 +3590,449 @@ func _handle_building_placement_click(idx: int):
 	else:
 		_update_placement_ghost_pos()
 		_show_message("Cannot place here! Move to a clear 2x2 grass or empty soil area.", false)
+
+func _on_production_updated():
+	_refresh_ui()
+	if mill_modal and mill_modal.visible:
+		_refresh_mill_modal()
+	if bakery_modal and bakery_modal.visible:
+		_refresh_bakery_modal()
+
+# ==============================================================================
+# Windmill Modal & Production System (Flour Milling)
+# ==============================================================================
+
+func _build_mill_modal():
+	mill_modal = Control.new()
+	mill_modal.name = "MillModal"
+	mill_modal.visible = false
+	$HUD.add_child(mill_modal)
+	mill_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var overlay = ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if (event is InputEventMouseButton and event.pressed) or (event is InputEventScreenTouch and event.pressed):
+			mill_modal.visible = false
+	)
+	mill_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(620, 420)
+	card.anchor_left = 0.5
+	card.anchor_right = 0.5
+	card.anchor_top = 0.5
+	card.anchor_bottom = 0.5
+	card.offset_left = -310.0
+	card.offset_right = 310.0
+	card.offset_top = -210.0
+	card.offset_bottom = 210.0
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.14, 0.12, 0.10, 0.96)
+	sb.set_border_width_all(3)
+	sb.border_color = Color(0.80, 0.68, 0.40, 0.95)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 16 if mobile_ui else 24
+	sb.content_margin_right = 16 if mobile_ui else 24
+	sb.content_margin_top = 16 if mobile_ui else 20
+	sb.content_margin_bottom = 16 if mobile_ui else 20
+	card.add_theme_stylebox_override("panel", sb)
+	mill_modal.add_child(card)
+	if mobile_ui:
+		_fit_mobile_panel(card)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10 if mobile_ui else 14)
+	card.add_child(vbox)
+	
+	var top_hbox = HBoxContainer.new()
+	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(top_hbox)
+	
+	mill_title_label = Label.new()
+	mill_title_label.text = "WINDMILL (Flour Processing)"
+	mill_title_label.add_theme_font_size_override("font_size", 18 if mobile_ui else 20)
+	mill_title_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 1.0))
+	mill_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_hbox.add_child(mill_title_label)
+	
+	mill_move_btn = Button.new()
+	mill_move_btn.text = "Move Mill"
+	mill_move_btn.custom_minimum_size = Vector2(90, 44 if mobile_ui else 34)
+	mill_move_btn.pressed.connect(func():
+		mill_modal.visible = false
+		_start_placement_mode("mill")
+	)
+	top_hbox.add_child(mill_move_btn)
+	
+	var close_btn = Button.new()
+	close_btn.text = " [X] "
+	close_btn.custom_minimum_size = Vector2(54, 44 if mobile_ui else 34)
+	close_btn.pressed.connect(func(): mill_modal.visible = false)
+	top_hbox.add_child(close_btn)
+	
+	var desc_lbl = Label.new()
+	desc_lbl.text = "Grind whole harvested wheat into stone-ground flour in the windmill."
+	desc_lbl.add_theme_font_size_override("font_size", 13)
+	desc_lbl.add_theme_color_override("font_color", Color(0.85, 0.80, 0.70, 0.9))
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc_lbl)
+	
+	# Conversion recipe panel
+	var rec_panel = PanelContainer.new()
+	var rec_sb = StyleBoxFlat.new()
+	rec_sb.bg_color = Color(0.20, 0.16, 0.12, 0.9)
+	rec_sb.set_border_width_all(1)
+	rec_sb.border_color = Color(0.6, 0.48, 0.32, 0.7)
+	rec_sb.set_corner_radius_all(8)
+	rec_sb.content_margin_left = 12
+	rec_sb.content_margin_right = 12
+	rec_sb.content_margin_top = 8
+	rec_sb.content_margin_bottom = 8
+	rec_panel.add_theme_stylebox_override("panel", rec_sb)
+	vbox.add_child(rec_panel)
+	
+	var rec_hbox = HBoxContainer.new()
+	rec_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	rec_hbox.add_theme_constant_override("separation", 16)
+	rec_panel.add_child(rec_hbox)
+	
+	var in_lbl = Label.new()
+	in_lbl.text = "Input: 1x Wheat"
+	in_lbl.add_theme_font_size_override("font_size", 14)
+	in_lbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7, 1.0))
+	rec_hbox.add_child(in_lbl)
+	
+	var arr_lbl = Label.new()
+	arr_lbl.text = "➔"
+	arr_lbl.add_theme_font_size_override("font_size", 16)
+	arr_lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8, 1.0))
+	rec_hbox.add_child(arr_lbl)
+	
+	var out_lbl = Label.new()
+	out_lbl.text = "Output: 1x Flour (12c)"
+	out_lbl.add_theme_font_size_override("font_size", 14)
+	out_lbl.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6, 1.0))
+	rec_hbox.add_child(out_lbl)
+	
+	var time_lbl = Label.new()
+	time_lbl.text = "• 5:00 Timer"
+	time_lbl.add_theme_font_size_override("font_size", 13)
+	time_lbl.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4, 1.0))
+	rec_hbox.add_child(time_lbl)
+	
+	# Status info
+	mill_info_label = Label.new()
+	mill_info_label.text = "Checking windmill..."
+	mill_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mill_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	mill_info_label.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(mill_info_label)
+	
+	mill_progress_bar = ProgressBar.new()
+	mill_progress_bar.custom_minimum_size = Vector2(0, 24)
+	mill_progress_bar.max_value = 1.0
+	mill_progress_bar.show_percentage = true
+	vbox.add_child(mill_progress_bar)
+	
+	mill_action_btn = Button.new()
+	mill_action_btn.custom_minimum_size = Vector2(0, 48)
+	mill_action_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mill_action_btn.pressed.connect(_on_mill_action_pressed)
+	vbox.add_child(mill_action_btn)
+
+func _open_mill_modal():
+	_close_farm_menus()
+	mill_modal.visible = true
+	_refresh_mill_modal()
+
+func _refresh_mill_modal():
+	if not mill_modal or not mill_modal.visible:
+		return
+	var b_data = GameState.buildings.get("mill", {})
+	var wheat_count = GameState.get_barn_item_count("wheat")
+	var is_proc = b_data.get("is_processing", false)
+	var output_ready = int(b_data.get("output_ready", 0))
+	var started = float(b_data.get("process_started_at", 0.0))
+	var duration = float(b_data.get("process_duration", 300.0))
+	var now = Time.get_unix_time_from_system()
+	
+	if output_ready > 0:
+		mill_info_label.text = "Milling Complete! %dx Stone-Ground Flour ready for collection." % output_ready
+		mill_info_label.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6, 1.0))
+		mill_progress_bar.visible = true
+		mill_progress_bar.value = 1.0
+		mill_action_btn.disabled = false
+		mill_action_btn.text = "Collect Flour (%dx Ready)" % output_ready
+		var sb_r = StyleBoxFlat.new()
+		sb_r.bg_color = Color(0.18, 0.48, 0.20, 0.95)
+		sb_r.set_border_width_all(2)
+		sb_r.border_color = Color(0.75, 1.0, 0.50, 1.0)
+		sb_r.set_corner_radius_all(8)
+		mill_action_btn.add_theme_stylebox_override("normal", sb_r)
+		mill_action_btn.add_theme_stylebox_override("hover", sb_r)
+	elif is_proc:
+		var elapsed = max(0.0, now - started)
+		var left = max(0.0, duration - elapsed)
+		var pct = clampf(elapsed / duration, 0.0, 1.0)
+		mill_info_label.text = "Milling wheat into fine flour... %s remaining" % GameData.format_time(left)
+		mill_info_label.add_theme_color_override("font_color", Color(1.0, 0.90, 0.45, 1.0))
+		mill_progress_bar.visible = true
+		mill_progress_bar.value = pct
+		mill_action_btn.disabled = true
+		mill_action_btn.text = "Milling in Progress (%s)" % GameData.format_time(left)
+		mill_action_btn.remove_theme_stylebox_override("normal")
+		mill_action_btn.remove_theme_stylebox_override("hover")
+	else:
+		mill_progress_bar.visible = false
+		mill_info_label.text = "Windmill is idle. (Stored in Barn: %d Wheat)" % wheat_count
+		mill_info_label.add_theme_color_override("font_color", Color(0.95, 0.90, 0.80, 1.0))
+		if wheat_count >= 1:
+			mill_action_btn.disabled = false
+			mill_action_btn.text = "Start Milling (Cost: 1 Wheat • 5:00)"
+			var sb_go = StyleBoxFlat.new()
+			sb_go.bg_color = Color(0.24, 0.38, 0.18, 0.95)
+			sb_go.set_border_width_all(2)
+			sb_go.border_color = Color(0.80, 1.0, 0.50, 1.0)
+			sb_go.set_corner_radius_all(8)
+			mill_action_btn.add_theme_stylebox_override("normal", sb_go)
+			mill_action_btn.add_theme_stylebox_override("hover", sb_go)
+		else:
+			mill_action_btn.disabled = true
+			mill_action_btn.text = "Need 1 Wheat in Barn to Mill"
+			mill_action_btn.remove_theme_stylebox_override("normal")
+			mill_action_btn.remove_theme_stylebox_override("hover")
+
+func _on_mill_action_pressed():
+	var b_data = GameState.buildings.get("mill", {})
+	if b_data.get("output_ready", 0) > 0:
+		GameState.collect_milled_flour()
+	elif not b_data.get("is_processing", false):
+		GameState.start_milling()
+	_refresh_mill_modal()
+
+# ==============================================================================
+# Artisan Bakery Modal & Production System (Bread Baking)
+# ==============================================================================
+
+func _build_bakery_modal():
+	bakery_modal = Control.new()
+	bakery_modal.name = "BakeryModal"
+	bakery_modal.visible = false
+	$HUD.add_child(bakery_modal)
+	bakery_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var overlay = ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.72)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(func(event):
+		if (event is InputEventMouseButton and event.pressed) or (event is InputEventScreenTouch and event.pressed):
+			bakery_modal.visible = false
+	)
+	bakery_modal.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(620, 420)
+	card.anchor_left = 0.5
+	card.anchor_right = 0.5
+	card.anchor_top = 0.5
+	card.anchor_bottom = 0.5
+	card.offset_left = -310.0
+	card.offset_right = 310.0
+	card.offset_top = -210.0
+	card.offset_bottom = 210.0
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.16, 0.10, 0.06, 0.96)
+	sb.set_border_width_all(3)
+	sb.border_color = Color(0.90, 0.60, 0.30, 0.95)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 16 if mobile_ui else 24
+	sb.content_margin_right = 16 if mobile_ui else 24
+	sb.content_margin_top = 16 if mobile_ui else 20
+	sb.content_margin_bottom = 16 if mobile_ui else 20
+	card.add_theme_stylebox_override("panel", sb)
+	bakery_modal.add_child(card)
+	if mobile_ui:
+		_fit_mobile_panel(card)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10 if mobile_ui else 14)
+	card.add_child(vbox)
+	
+	var top_hbox = HBoxContainer.new()
+	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(top_hbox)
+	
+	bakery_title_label = Label.new()
+	bakery_title_label.text = "ARTISAN BAKERY (Bread Oven)"
+	bakery_title_label.add_theme_font_size_override("font_size", 18 if mobile_ui else 20)
+	bakery_title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.55, 1.0))
+	bakery_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_hbox.add_child(bakery_title_label)
+	
+	bakery_move_btn = Button.new()
+	bakery_move_btn.text = "Move Bakery"
+	bakery_move_btn.custom_minimum_size = Vector2(100, 44 if mobile_ui else 34)
+	bakery_move_btn.pressed.connect(func():
+		bakery_modal.visible = false
+		_start_placement_mode("bakery")
+	)
+	top_hbox.add_child(bakery_move_btn)
+	
+	var close_btn = Button.new()
+	close_btn.text = " [X] "
+	close_btn.custom_minimum_size = Vector2(54, 44 if mobile_ui else 34)
+	close_btn.pressed.connect(func(): bakery_modal.visible = false)
+	top_hbox.add_child(close_btn)
+	
+	var desc_lbl = Label.new()
+	desc_lbl.text = "Bake milled flour into artisan farmhouse bread loaves worth 150 coins (12.5x wheat value!)."
+	desc_lbl.add_theme_font_size_override("font_size", 13)
+	desc_lbl.add_theme_color_override("font_color", Color(0.90, 0.82, 0.70, 0.9))
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(desc_lbl)
+	
+	# Conversion recipe panel
+	var rec_panel = PanelContainer.new()
+	var rec_sb = StyleBoxFlat.new()
+	rec_sb.bg_color = Color(0.22, 0.14, 0.08, 0.9)
+	rec_sb.set_border_width_all(1)
+	rec_sb.border_color = Color(0.7, 0.45, 0.25, 0.7)
+	rec_sb.set_corner_radius_all(8)
+	rec_sb.content_margin_left = 12
+	rec_sb.content_margin_right = 12
+	rec_sb.content_margin_top = 8
+	rec_sb.content_margin_bottom = 8
+	rec_panel.add_theme_stylebox_override("panel", rec_sb)
+	vbox.add_child(rec_panel)
+	
+	var rec_hbox = HBoxContainer.new()
+	rec_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	rec_hbox.add_theme_constant_override("separation", 16)
+	rec_panel.add_child(rec_hbox)
+	
+	var in_lbl = Label.new()
+	in_lbl.text = "Input: 1x Flour"
+	in_lbl.add_theme_font_size_override("font_size", 14)
+	in_lbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7, 1.0))
+	rec_hbox.add_child(in_lbl)
+	
+	var arr_lbl = Label.new()
+	arr_lbl.text = "➔"
+	arr_lbl.add_theme_font_size_override("font_size", 16)
+	arr_lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8, 1.0))
+	rec_hbox.add_child(arr_lbl)
+	
+	var out_lbl = Label.new()
+	out_lbl.text = "Output: 1x Bread (150c!)"
+	out_lbl.add_theme_font_size_override("font_size", 14)
+	out_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3, 1.0))
+	rec_hbox.add_child(out_lbl)
+	
+	var time_lbl = Label.new()
+	time_lbl.text = "• 10:00 Timer"
+	time_lbl.add_theme_font_size_override("font_size", 13)
+	time_lbl.add_theme_color_override("font_color", Color(1.0, 0.65, 0.35, 1.0))
+	rec_hbox.add_child(time_lbl)
+	
+	# Status info
+	bakery_info_label = Label.new()
+	bakery_info_label.text = "Checking bakery oven..."
+	bakery_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bakery_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	bakery_info_label.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(bakery_info_label)
+	
+	bakery_progress_bar = ProgressBar.new()
+	bakery_progress_bar.custom_minimum_size = Vector2(0, 24)
+	bakery_progress_bar.max_value = 1.0
+	bakery_progress_bar.show_percentage = true
+	vbox.add_child(bakery_progress_bar)
+	
+	bakery_action_btn = Button.new()
+	bakery_action_btn.custom_minimum_size = Vector2(0, 48)
+	bakery_action_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bakery_action_btn.pressed.connect(_on_bakery_action_pressed)
+	vbox.add_child(bakery_action_btn)
+
+func _open_bakery_modal():
+	_close_farm_menus()
+	bakery_modal.visible = true
+	_refresh_bakery_modal()
+
+func _refresh_bakery_modal():
+	if not bakery_modal or not bakery_modal.visible:
+		return
+	var b_data = GameState.buildings.get("bakery", {})
+	var flour_count = GameState.get_barn_item_count("flour")
+	var is_proc = b_data.get("is_processing", false)
+	var output_ready = int(b_data.get("output_ready", 0))
+	var started = float(b_data.get("process_started_at", 0.0))
+	var duration = float(b_data.get("process_duration", 600.0))
+	var now = Time.get_unix_time_from_system()
+	
+	if output_ready > 0:
+		bakery_info_label.text = "Baking Complete! %dx Fresh Artisan Bread ready for collection!" % output_ready
+		bakery_info_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.30, 1.0))
+		bakery_progress_bar.visible = true
+		bakery_progress_bar.value = 1.0
+		bakery_action_btn.disabled = false
+		bakery_action_btn.text = "Collect Artisan Bread (+150c Value!)"
+		var sb_r = StyleBoxFlat.new()
+		sb_r.bg_color = Color(0.48, 0.28, 0.10, 0.95)
+		sb_r.set_border_width_all(2)
+		sb_r.border_color = Color(1.0, 0.85, 0.40, 1.0)
+		sb_r.set_corner_radius_all(8)
+		bakery_action_btn.add_theme_stylebox_override("normal", sb_r)
+		bakery_action_btn.add_theme_stylebox_override("hover", sb_r)
+	elif is_proc:
+		var elapsed = max(0.0, now - started)
+		var left = max(0.0, duration - elapsed)
+		var pct = clampf(elapsed / duration, 0.0, 1.0)
+		bakery_info_label.text = "Baking artisan bread in brick oven... %s remaining" % GameData.format_time(left)
+		bakery_info_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45, 1.0))
+		bakery_progress_bar.visible = true
+		bakery_progress_bar.value = pct
+		bakery_action_btn.disabled = true
+		bakery_action_btn.text = "Baking in Progress (%s)" % GameData.format_time(left)
+		bakery_action_btn.remove_theme_stylebox_override("normal")
+		bakery_action_btn.remove_theme_stylebox_override("hover")
+	else:
+		bakery_progress_bar.visible = false
+		bakery_info_label.text = "Oven is hot and ready. (Stored in Barn: %d Flour)" % flour_count
+		bakery_info_label.add_theme_color_override("font_color", Color(0.95, 0.90, 0.80, 1.0))
+		if flour_count >= 1:
+			bakery_action_btn.disabled = false
+			bakery_action_btn.text = "Bake Artisan Bread (Cost: 1 Flour • 10:00)"
+			var sb_go = StyleBoxFlat.new()
+			sb_go.bg_color = Color(0.40, 0.22, 0.08, 0.95)
+			sb_go.set_border_width_all(2)
+			sb_go.border_color = Color(1.0, 0.80, 0.40, 1.0)
+			sb_go.set_corner_radius_all(8)
+			bakery_action_btn.add_theme_stylebox_override("normal", sb_go)
+			bakery_action_btn.add_theme_stylebox_override("hover", sb_go)
+		else:
+			bakery_action_btn.disabled = true
+			bakery_action_btn.text = "Need 1 Flour in Barn to Bake Bread"
+			bakery_action_btn.remove_theme_stylebox_override("normal")
+			bakery_action_btn.remove_theme_stylebox_override("hover")
+
+func _on_bakery_action_pressed():
+	var b_data = GameState.buildings.get("bakery", {})
+	if b_data.get("output_ready", 0) > 0:
+		GameState.collect_baked_bread()
+	elif not b_data.get("is_processing", false):
+		GameState.start_baking()
+	_refresh_bakery_modal()
 

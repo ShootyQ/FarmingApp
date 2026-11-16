@@ -175,25 +175,25 @@ const ITEMS = {
 	"wooden_fence": {
 		"name": "Rustic Picket Fence",
 		"sell_value": 35,
-		"icon": "res://assets/ui/res_icon_wood.png",
+		"icon": "res://assets/objects/wooden_fence.png",
 		"desc": "Hand-carved cedar fence post section to beautify plots."
 	},
 	"stone_well": {
 		"name": "Cobblestone Well",
 		"sell_value": 200,
-		"icon": "res://assets/ui/res_icon_stone.png",
+		"icon": "res://assets/objects/stone_well.png",
 		"desc": "Fresh wellspring that keeps adjacent crops hydrated (+15% grow speed)."
 	},
 	"lantern_post": {
 		"name": "Brass Lantern Post",
 		"sell_value": 60,
-		"icon": "res://assets/ui/res_icon_relic.png",
+		"icon": "res://assets/objects/lantern_post.png",
 		"desc": "Warm kerosene lamp post casting a cozy glow over the fields."
 	},
 	"planter_box": {
 		"name": "Floral Planter Box",
 		"sell_value": 75,
-		"icon": "res://assets/icons/icon_wheat.png",
+		"icon": "res://assets/objects/planter_box.png",
 		"desc": "Fragrant cedar planter filled with wildflowers."
 	},
 	"timber_plank": {
@@ -207,6 +207,18 @@ const ITEMS = {
 		"sell_value": 25,
 		"icon": "res://assets/ui/res_icon_stone.png",
 		"desc": "Square cut foundation stone blocks for durable structures."
+	},
+	"flour": {
+		"name": "Stone-Ground Flour",
+		"sell_value": 12,
+		"icon": "res://assets/icons/icon_flour.png",
+		"desc": "Finely milled whole wheat flour ready for the bakery oven."
+	},
+	"bread": {
+		"name": "Artisan Farmhouse Bread",
+		"sell_value": 150,
+		"icon": "res://assets/icons/icon_bread.png",
+		"desc": "Freshly baked crusty golden bread loaf with incredible aroma."
 	}
 }
 
@@ -279,6 +291,26 @@ const CRAFTING_RECIPES = {
 		"yield_count": 2,
 		"is_unique": false
 	},
+	"mill": {
+		"id": "mill",
+		"name": "Windmill",
+		"category": "Buildings",
+		"desc": "2x2 milling facility that grinds harvested wheat into stone-ground flour (5:00 timer).",
+		"cost": {"wood": 20, "stone": 15, "coins": 150},
+		"yield_item": "mill",
+		"yield_count": 1,
+		"is_unique": true
+	},
+	"bakery": {
+		"id": "bakery",
+		"name": "Artisan Bakery",
+		"category": "Buildings",
+		"desc": "2x2 brick oven bakery that bakes flour into artisan bread worth 150c (10:00 timer).",
+		"cost": {"cut_stone": 4, "timber_plank": 2, "wood": 20, "coins": 250},
+		"yield_item": "bakery",
+		"yield_count": 1,
+		"is_unique": true
+	},
 	"barn_expansion_1": {
 		"id": "barn_expansion_1",
 		"name": "Reinforced Barn Loft",
@@ -293,7 +325,8 @@ const CRAFTING_RECIPES = {
 
 func get_item_info(item_id: String) -> Dictionary:
 	var info: Dictionary = ITEMS.get(item_id, {"name": item_id.capitalize(), "icon": "", "desc": "Farm produce."}).duplicate()
-	info["sell_value"] = 10
+	if not info.has("sell_value"):
+		info["sell_value"] = 10
 	for crop_id in CROPS:
 		if item_id == crop_id:
 			info["sell_value"] = CROPS[crop_id]["reward"]

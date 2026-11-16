@@ -12,8 +12,13 @@ signal farm_replaced
 signal tool_used(sector_coord: String, tile_idx: int, tool_id: String)
 signal workshop_opened
 signal workshop_unlocked_signal
+signal mill_opened
+signal bakery_opened
+signal production_updated
 signal buildings_updated
 signal mode_changed(new_mode: String)
+
+const PLACEABLE_DECORATIONS = ["wooden_fence", "stone_well", "lantern_post", "planter_box"]
 
 var coins: int = 150
 var wood: int = 10
@@ -54,6 +59,36 @@ var buildings: Dictionary = {
 		"w": 2,
 		"h": 2,
 		"placed": false
+	},
+	"mill": {
+		"id": "mill",
+		"name": "Windmill",
+		"sector": "1,1",
+		"gx": 0,
+		"gy": 0,
+		"w": 2,
+		"h": 2,
+		"placed": false,
+		"unlocked": false,
+		"is_processing": false,
+		"process_started_at": 0.0,
+		"process_duration": 300.0, # 5 min
+		"output_ready": 0
+	},
+	"bakery": {
+		"id": "bakery",
+		"name": "Artisan Bakery",
+		"sector": "1,1",
+		"gx": 0,
+		"gy": 0,
+		"w": 2,
+		"h": 2,
+		"placed": false,
+		"unlocked": false,
+		"is_processing": false,
+		"process_started_at": 0.0,
+		"process_duration": 600.0, # 10 min
+		"output_ready": 0
 	}
 }
 
@@ -218,10 +253,24 @@ func interact_with_tile(sector_coord: String, tile_idx: int, mode_override: Stri
 				barn_opened.emit()
 			elif b_id == "workshop":
 				workshop_opened.emit()
+			elif b_id == "mill":
+				mill_opened.emit()
+			elif b_id == "bakery":
+				bakery_opened.emit()
 		"barn":
 			barn_opened.emit()
 		"workshop":
 			workshop_opened.emit()
+		"mill":
+			mill_opened.emit()
+		"bakery":
+			bakery_opened.emit()
+		"decoration":
+			if current_mode == "tools" or current_mode == "all":
+				pickup_decoration(sector_coord, tile_idx)
+			else:
+				var d_info = GameData.get_item_info(tile.get("item_id", ""))
+				message_broadcast.emit("%s (Decoration). Switch to Tools mode to pick up." % d_info.get("name", "Decoration"), false)
 		"obstacle":
 			if current_mode == "tools" or current_mode == "all":
 				used_tool = _handle_tap_obstacle(sector_coord, tile_idx, tile)
@@ -333,6 +382,171 @@ func place_building(building_id: String, sector_coord: String, gx: int, gy: int)
 	state_updated.emit()
 	return true
 
+# Placeable Decorations System (1x1 Footprint on Farm Plots / Meadow)
+func can_place_decoration(item_id: String, sector_coord: String, gx: int, gy: int) -> bool:
+	if not (item_id in PLACEABLE_DECORATIONS):
+		return false
+	if not is_sector_unlocked(sector_coord):
+		return false
+	if gx < GameData.MEADOW_MIN or gx > GameData.MEADOW_MAX or gy < GameData.MEADOW_MIN or gy > GameData.MEADOW_MAX:
+		return false
+	if get_barn_item_count(item_id) < 1:
+		return false
+	var idx = GameData.get_farm_index(Vector2i(gx, gy))
+	var tiles = sector_tiles.get(sector_coord, [])
+	if idx < 0 or idx >= tiles.size():
+		return false
+	var t = tiles[idx]
+	var t_type = t.get("type", "grass")
+	if t_type == "grass":
+		return true
+	if t_type == "soil" and t.get("state", "empty") == "empty":
+		return true
+	return false
+
+func place_decoration(item_id: String, sector_coord: String, gx: int, gy: int) -> bool:
+	if not can_place_decoration(item_id, sector_coord, gx, gy):
+		return false
+	var idx = GameData.get_farm_index(Vector2i(gx, gy))
+	var tiles = sector_tiles.get(sector_coord, [])
+	if not remove_from_barn(item_id, 1):
+		return false
+	tiles[idx] = {
+		"type": "decoration",
+		"item_id": item_id,
+		"gx": gx,
+		"gy": gy
+	}
+	tile_updated.emit(sector_coord, idx)
+	save_game()
+	state_updated.emit()
+	barn_updated.emit()
+	message_broadcast.emit("Placed %s on farm plot!" % GameData.get_item_info(item_id)["name"], true)
+	return true
+
+func pickup_decoration(sector_coord: String, tile_idx: int) -> bool:
+	var tiles = sector_tiles.get(sector_coord, [])
+	if tile_idx < 0 or tile_idx >= tiles.size():
+		return false
+	var tile = tiles[tile_idx]
+	if tile.get("type") != "decoration":
+		return false
+	var item_id = tile.get("item_id", "")
+	if not add_to_barn(item_id, 1):
+		message_broadcast.emit("Barn is full! Cannot pick up %s." % GameData.get_item_info(item_id)["name"], false)
+		return false
+	tile.clear()
+	tile["type"] = "grass"
+	tile_updated.emit(sector_coord, tile_idx)
+	save_game()
+	state_updated.emit()
+	barn_updated.emit()
+	message_broadcast.emit("Picked up %s and returned to Barn." % GameData.get_item_info(item_id)["name"], true)
+	return true
+
+func _has_adjacent_stone_well(sector_coord: String, tile_idx: int) -> bool:
+	if tile_idx < 0 or tile_idx >= GameData.farm_coordinates.size():
+		return false
+	var pos = GameData.farm_coordinates[tile_idx]
+	var tiles = sector_tiles.get(sector_coord, [])
+	for dy in range(-2, 3):
+		for dx in range(-2, 3):
+			var n_idx = GameData.get_farm_index(Vector2i(pos.x + dx, pos.y + dy))
+			if n_idx >= 0 and n_idx < tiles.size():
+				var t = tiles[n_idx]
+				if t.get("type") == "decoration" and t.get("item_id") == "stone_well":
+					return true
+	return false
+
+# Mill & Bakery Production Facilities
+func start_milling() -> bool:
+	var mill = buildings.get("mill", {})
+	if not mill.get("unlocked", false):
+		message_broadcast.emit("Craft the Windmill in the Workshop first!", false)
+		return false
+	if not mill.get("placed", false):
+		message_broadcast.emit("Place the Windmill on your farm first!", false)
+		return false
+	if mill.get("is_processing", false):
+		message_broadcast.emit("Windmill is already grinding wheat!", false)
+		return false
+	if mill.get("output_ready", 0) > 0:
+		message_broadcast.emit("Collect the milled flour before grinding more wheat!", false)
+		return false
+	if get_barn_item_count("wheat") < 1:
+		message_broadcast.emit("Need at least 1 Wheat stored in Barn to grind into flour!", false)
+		return false
+	remove_from_barn("wheat", 1)
+	mill["is_processing"] = true
+	mill["process_started_at"] = Time.get_unix_time_from_system()
+	mill["process_duration"] = 300.0 # 5 min timer
+	save_game()
+	production_updated.emit()
+	state_updated.emit()
+	message_broadcast.emit("Started milling wheat! Flour ready in 5:00.", true)
+	return true
+
+func collect_milled_flour() -> int:
+	var mill = buildings.get("mill", {})
+	var amount = int(mill.get("output_ready", 0))
+	if amount <= 0:
+		message_broadcast.emit("No milled flour ready for collection.", false)
+		return 0
+	if not add_to_barn("flour", amount):
+		message_broadcast.emit("Barn is full! Make space to collect flour.", false)
+		return 0
+	mill["output_ready"] = 0
+	save_game()
+	production_updated.emit()
+	barn_updated.emit()
+	state_updated.emit()
+	message_broadcast.emit("Collected %dx Stone-Ground Flour into Barn!" % amount, true)
+	return amount
+
+func start_baking() -> bool:
+	var bakery = buildings.get("bakery", {})
+	if not bakery.get("unlocked", false):
+		message_broadcast.emit("Craft the Artisan Bakery in the Workshop first!", false)
+		return false
+	if not bakery.get("placed", false):
+		message_broadcast.emit("Place the Artisan Bakery on your farm first!", false)
+		return false
+	if bakery.get("is_processing", false):
+		message_broadcast.emit("Bakery oven is already baking bread!", false)
+		return false
+	if bakery.get("output_ready", 0) > 0:
+		message_broadcast.emit("Collect the baked bread before baking another loaf!", false)
+		return false
+	if get_barn_item_count("flour") < 1:
+		message_broadcast.emit("Need at least 1 Flour stored in Barn to bake artisan bread!", false)
+		return false
+	remove_from_barn("flour", 1)
+	bakery["is_processing"] = true
+	bakery["process_started_at"] = Time.get_unix_time_from_system()
+	bakery["process_duration"] = 600.0 # 10 min timer
+	save_game()
+	production_updated.emit()
+	state_updated.emit()
+	message_broadcast.emit("Baking bread in the brick oven! Golden loaf ready in 10:00.", true)
+	return true
+
+func collect_baked_bread() -> int:
+	var bakery = buildings.get("bakery", {})
+	var amount = int(bakery.get("output_ready", 0))
+	if amount <= 0:
+		message_broadcast.emit("No baked bread ready for collection.", false)
+		return 0
+	if not add_to_barn("bread", amount):
+		message_broadcast.emit("Barn is full! Make space to collect bread.", false)
+		return 0
+	bakery["output_ready"] = 0
+	save_game()
+	production_updated.emit()
+	barn_updated.emit()
+	state_updated.emit()
+	message_broadcast.emit("Collected %dx Artisan Farmhouse Bread (150c) into Barn!" % amount, true)
+	return amount
+
 func can_build_workshop() -> bool:
 	if workshop_unlocked:
 		return false
@@ -409,6 +623,12 @@ func craft_recipe(recipe_id: String) -> bool:
 	if recipe_id == "barn_expansion_1":
 		barn_slots_max = 15
 		message_broadcast.emit("Reinforced Barn Loft built! Storage expanded to 15 slots!", true)
+	elif recipe_id == "mill":
+		buildings["mill"]["unlocked"] = true
+		message_broadcast.emit("Windmill Crafted! Ready to place on your farm!", true)
+	elif recipe_id == "bakery":
+		buildings["bakery"]["unlocked"] = true
+		message_broadcast.emit("Artisan Bakery Crafted! Ready to place on your farm!", true)
 	else:
 		var yield_item = r.get("yield_item", recipe_id)
 		var yield_count = r.get("yield_count", 1)
@@ -514,9 +734,16 @@ func _handle_tap_soil(sector_coord: String, tile_idx: int, tile: Dictionary):
 			tile["state"] = "growing"
 			tile["crop"] = selected_crop
 			tile["plant_time"] = Time.get_unix_time_from_system()
-			tile["grow_duration"] = crop_data["grow_time"]
+			var duration = float(crop_data["grow_time"])
+			var has_well = _has_adjacent_stone_well(sector_coord, tile_idx)
+			if has_well:
+				duration = roundf(duration * 0.85)
+			tile["grow_duration"] = duration
 			tile["is_mutated"] = (randf() < crop_data["mutation_chance"])
-			message_broadcast.emit("Planted %s! (%d seeds remaining in pouch)" % [crop_name, seed_inventory[selected_crop]], true)
+			if has_well:
+				message_broadcast.emit("Planted %s! (Hydrated by Cobblestone Well: +15%% grow speed!)" % crop_name, true)
+			else:
+				message_broadcast.emit("Planted %s! (%d seeds remaining in pouch)" % [crop_name, seed_inventory[selected_crop]], true)
 			tile_updated.emit(sector_coord, tile_idx)
 			state_updated.emit()
 			save_game()
@@ -579,6 +806,16 @@ func update_crop_timers(now: float = -1.0):
 					tile_updated.emit(coord, i)
 					changed = true
 		changed = _replenish_resources(coord, now) or changed
+	for b_id in ["mill", "bakery"]:
+		var b = buildings.get(b_id, {})
+		if b.get("is_processing", false):
+			var started = float(b.get("process_started_at", 0.0))
+			var dur = float(b.get("process_duration", 300.0 if b_id == "mill" else 600.0))
+			if now >= started + dur:
+				b["is_processing"] = false
+				b["output_ready"] = int(b.get("output_ready", 0)) + 1
+				changed = true
+				production_updated.emit()
 	if changed:
 		save_game()
 		state_updated.emit()
@@ -673,7 +910,9 @@ func start_new_farm() -> bool:
 	seed_inventory = {"wheat": 8, "carrot": 0, "strawberry": 0, "pumpkin": 0}
 	buildings = {
 		"barn": {"sector": "1,1", "gx": 0, "gy": 0, "w": 2, "h": 2, "placed": true},
-		"workshop": {"sector": "1,1", "gx": 0, "gy": 0, "w": 2, "h": 2, "placed": false}
+		"workshop": {"sector": "1,1", "gx": 2, "gy": 2, "w": 2, "h": 2, "placed": false},
+		"mill": {"sector": "1,1", "gx": 0, "gy": 0, "w": 2, "h": 2, "placed": false, "unlocked": false, "is_processing": false, "process_started_at": 0.0, "process_duration": 300.0, "output_ready": 0},
+		"bakery": {"sector": "1,1", "gx": 0, "gy": 0, "w": 2, "h": 2, "placed": false, "unlocked": false, "is_processing": false, "process_started_at": 0.0, "process_duration": 600.0, "output_ready": 0}
 	}
 	workshop_unlocked = false
 	play_time_seconds = 0.0
@@ -706,7 +945,7 @@ func _valid_backup(data: Variant) -> bool:
 		if typeof(tiles) != TYPE_ARRAY or tiles.size() < 16:
 			return false
 		for tile in tiles:
-			if typeof(tile) != TYPE_DICTIONARY or tile.get("type", "") not in ["soil", "grass", "obstacle", "barn", "building", "preparing"]:
+			if typeof(tile) != TYPE_DICTIONARY or tile.get("type", "") not in ["soil", "grass", "obstacle", "barn", "building", "preparing", "decoration"]:
 				return false
 	return true
 
@@ -819,6 +1058,49 @@ func _apply_save_data(parsed: Dictionary):
 						"is_origin": (dx == 0 and dy == 0),
 						"origin_idx": ws_origin_idx
 					}
+	
+	# Ensure mill and bakery default states and tile footprints
+	for b_id in ["mill", "bakery"]:
+		if not buildings.has(b_id) or typeof(buildings[b_id]) != TYPE_DICTIONARY:
+			buildings[b_id] = {
+				"id": b_id,
+				"name": "Windmill" if b_id == "mill" else "Artisan Bakery",
+				"sector": "1,1",
+				"gx": 0,
+				"gy": 0,
+				"w": 2,
+				"h": 2,
+				"placed": false,
+				"unlocked": false,
+				"is_processing": false,
+				"process_started_at": 0.0,
+				"process_duration": 300.0 if b_id == "mill" else 600.0,
+				"output_ready": 0
+			}
+		else:
+			if not buildings[b_id].has("unlocked"): buildings[b_id]["unlocked"] = false
+			if not buildings[b_id].has("is_processing"): buildings[b_id]["is_processing"] = false
+			if not buildings[b_id].has("process_started_at"): buildings[b_id]["process_started_at"] = 0.0
+			if not buildings[b_id].has("process_duration"): buildings[b_id]["process_duration"] = 300.0 if b_id == "mill" else 600.0
+			if not buildings[b_id].has("output_ready"): buildings[b_id]["output_ready"] = 0
+		
+		var b_data = buildings[b_id]
+		if b_data.get("placed", false):
+			var b_sec = b_data.get("sector", "1,1")
+			var b_gx = int(b_data.get("gx", 0))
+			var b_gy = int(b_data.get("gy", 0))
+			var b_tiles = sector_tiles.get(b_sec, [])
+			var b_origin_idx = GameData.get_farm_index(Vector2i(b_gx, b_gy))
+			for dy in range(2):
+				for dx in range(2):
+					var idx = GameData.get_farm_index(Vector2i(b_gx + dx, b_gy + dy))
+					if idx >= 0 and idx < b_tiles.size():
+						b_tiles[idx] = {
+							"type": "building",
+							"building_id": b_id,
+							"is_origin": (dx == 0 and dy == 0),
+							"origin_idx": b_origin_idx
+						}
 	
 	# Load seed inventory
 	var loaded_seeds = parsed.get("seed_inventory", {})
