@@ -299,4 +299,20 @@ func _test_ui_modals_and_placement_mode(game_state, game_data):
 	main_scene._handle_isometric_click(screen_pt)
 	_assert(not main_scene.barn_modal.visible, "Tapping green square in front of barn does not open Barn modal")
 	
+	# Test BGM AudioStreamPlayer and Music toggle button
+	_assert(game_state.bgm_player != null, "BGM player exists in GameState")
+	_assert(game_state.bgm_player.stream != null, "BGM stream (Golden Field Clarinet) is loaded")
+	_assert(game_state.bgm_player.stream.loop, "BGM stream has loop enabled")
+	_assert(main_scene.music_btn != null, "Music button exists in HUD")
+	
+	game_state.set_music_enabled(true)
+	main_scene._update_music_btn_text()
+	_assert(main_scene.music_btn.text == "Music: ON", "Music button displays 'Music: ON'")
+	main_scene.music_btn.pressed.emit()
+	_assert(not game_state.music_enabled, "Tapping music button mutes music")
+	_assert(main_scene.music_btn.text == "Music: OFF", "Music button displays 'Music: OFF'")
+	main_scene.music_btn.pressed.emit()
+	_assert(game_state.music_enabled, "Tapping music button unmutes music")
+	_assert(main_scene.music_btn.text == "Music: ON", "Music button returns to 'Music: ON'")
+	
 	main_scene.queue_free()

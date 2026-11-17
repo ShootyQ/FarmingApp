@@ -163,6 +163,9 @@ var bakery_move_btn: Button
 var barn_place_btn: Button
 var barn_selected_slot_idx: int = -1
 
+# Music Toggle Button
+var music_btn: Button = null
+
 # Mode Switcher (Planting vs Tools)
 var mode_switcher_bar: PanelContainer = null
 var mode_plant_btn: Button = null
@@ -303,6 +306,13 @@ func _ready():
 	workshop_btn.pressed.connect(_on_workshop_btn_pressed)
 	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(workshop_btn)
 	
+	music_btn = Button.new()
+	music_btn.name = "MusicBtn"
+	music_btn.text = "Music: ON" if GameState.music_enabled else "Music: OFF"
+	music_btn.add_theme_stylebox_override("normal", make_wood_small_sb.call())
+	music_btn.pressed.connect(_on_music_btn_pressed)
+	$HUD/Margin/VBox/TopBar/SectorInfo.add_child(music_btn)
+	
 	dev_unlock_btn = Button.new()
 	dev_unlock_btn.text = "+Res"
 	dev_unlock_btn.tooltip_text = "Dev: Grant +350c +15w +10s to test Workshop Construction"
@@ -386,6 +396,9 @@ func _setup_mobile_hud():
 	barn_btn.custom_minimum_size.y = 48
 	if workshop_btn:
 		workshop_btn.custom_minimum_size.y = 48
+	if music_btn:
+		music_btn.custom_minimum_size.y = 48
+		music_btn.text = "Music" if GameState.music_enabled else "Muted"
 	if dev_unlock_btn:
 		dev_unlock_btn.custom_minimum_size.y = 48
 	if mode_plant_btn:
@@ -496,6 +509,8 @@ func _farm_modal_open() -> bool:
 	return (tool_menu and tool_menu.visible) or map_modal.visible or (seed_modal and seed_modal.visible) or (market_modal and market_modal.visible) or (barn_modal and barn_modal.visible) or (workshop_modal and workshop_modal.visible) or (workshop_blueprint_modal and workshop_blueprint_modal.visible) or (mill_modal and mill_modal.visible) or (bakery_modal and bakery_modal.visible)
 
 func _input(event: InputEvent):
+	if (event is InputEventMouseButton or event is InputEventScreenTouch) and event.pressed:
+		GameState.ensure_music_playing()
 	# Finish tracked touches even when released over a HUD button.
 	if event is InputEventScreenTouch and not event.pressed and touch_points.has(event.index):
 		var tapped = not event.canceled and not touch_moved and not touch_was_multitouch and not _farm_modal_open()
@@ -1339,7 +1354,24 @@ func _update_mode_switcher_ui():
 	mode_tools_btn.add_theme_stylebox_override("hover", sb_tools)
 	mode_tools_btn.add_theme_stylebox_override("pressed", sb_tools)
 
+func _on_music_btn_pressed():
+	var enabled = GameState.toggle_music()
+	_update_music_btn_text()
+	_show_message("Music: %s" % ("Playing (Golden Field Clarinet)" if enabled else "Muted"), true)
+
+func _update_music_btn_text():
+	if music_btn:
+		if mobile_ui:
+			music_btn.text = "Music" if GameState.music_enabled else "Muted"
+		else:
+			music_btn.text = "Music: ON" if GameState.music_enabled else "Music: OFF"
+		if GameState.music_enabled:
+			music_btn.modulate = Color(1.0, 1.0, 1.0, 1.0)
+		else:
+			music_btn.modulate = Color(0.75, 0.75, 0.75, 0.85)
+
 func _refresh_ui():
+	_update_music_btn_text()
 	_update_mode_switcher_ui()
 	if tool_effects and effect_sector != GameState.current_sector_coord:
 		tool_effects.clear()

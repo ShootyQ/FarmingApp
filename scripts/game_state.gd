@@ -120,8 +120,66 @@ var resource_last_tick: Dictionary = {}
 const BACKUP_PATH = "user://farm_save_backup.json"
 const SAVE_PATH = "user://farm_save.json"
 
+var bgm_player: AudioStreamPlayer = null
+var music_enabled: bool = true
+var music_volume: float = 0.65
+
 func _ready():
 	load_game()
+	_setup_bgm()
+
+func _setup_bgm():
+	if bgm_player == null:
+		bgm_player = AudioStreamPlayer.new()
+		bgm_player.name = "BGMPlayer"
+		bgm_player.bus = "Master"
+		add_child(bgm_player)
+		
+		var audio_path = "res://assets/audio/golden_field_clarinet.mp3"
+		if not ResourceLoader.exists(audio_path):
+			audio_path = "res://Golden Field Clarinet.mp3"
+		
+		if ResourceLoader.exists(audio_path):
+			var stream = load(audio_path) as AudioStreamMP3
+			if stream:
+				stream.loop = true
+				bgm_player.stream = stream
+				bgm_player.volume_db = linear_to_db(music_volume)
+				if music_enabled:
+					bgm_player.play()
+
+func toggle_music() -> bool:
+	music_enabled = not music_enabled
+	if bgm_player:
+		if music_enabled:
+			if not bgm_player.playing:
+				bgm_player.play()
+			else:
+				bgm_player.stream_paused = false
+		else:
+			bgm_player.stop()
+	save_game()
+	state_updated.emit()
+	return music_enabled
+
+func set_music_enabled(val: bool):
+	if music_enabled == val:
+		return
+	music_enabled = val
+	if bgm_player:
+		if music_enabled:
+			if not bgm_player.playing:
+				bgm_player.play()
+			else:
+				bgm_player.stream_paused = false
+		else:
+			bgm_player.stop()
+	save_game()
+	state_updated.emit()
+
+func ensure_music_playing():
+	if music_enabled and bgm_player and not bgm_player.playing:
+		bgm_player.play()
 
 func get_tool_info() -> Dictionary:
 	return GameData.TOOL_TIERS[tool_tier]
@@ -914,6 +972,7 @@ func get_save_data() -> Dictionary:
 		"workshop_unlocked": workshop_unlocked,
 		"barn_slots_max": barn_slots_max,
 		"crafted_recipes": crafted_recipes,
+		"music_enabled": music_enabled,
 		"save_time": Time.get_unix_time_from_system()
 	}
 func _write_save_data(path: String, data: Dictionary) -> bool:
@@ -1061,6 +1120,7 @@ func _apply_save_data(parsed: Dictionary):
 	play_time_seconds = float(parsed.get("play_time_seconds", 0.0))
 	workshop_unlocked = bool(parsed.get("workshop_unlocked", false))
 	crafted_recipes = parsed.get("crafted_recipes", {})
+	set_music_enabled(bool(parsed.get("music_enabled", true)))
 	
 	# Load buildings
 	if parsed.has("buildings") and typeof(parsed["buildings"]) == TYPE_DICTIONARY:
