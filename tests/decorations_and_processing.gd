@@ -221,4 +221,37 @@ func _test_ui_modals_and_placement_mode(game_state, game_data):
 	main_scene._stop_placement_mode()
 	_assert(not main_scene.is_placing_building, "Placement mode stopped")
 	
+	# Test green placement alignment under 2x2 building
+	main_scene._start_placement_mode("workshop")
+	var ghost_spr = main_scene.placement_ghost_node.get_node("GhostSprite") as Sprite2D
+	var tex_h = ghost_spr.texture.get_height()
+	var bot_world = (tex_h * 0.5 + ghost_spr.offset.y) * ghost_spr.scale.y
+	_assert(bot_world >= 95.0 and bot_world <= 115.0, "Workshop ghost sprite sits directly on 2x2 diamond base (bot_world=%f, expected 95-115)" % bot_world)
+	main_scene._stop_placement_mode()
+	
+	# Test barn click hitboxes:
+	# Barn placed at (0, 0) spans (0, 0), (1, 0), (0, 1), (1, 1).
+	# The two squares in front of the barn are (0, 2) and (1, 2).
+	var barn_pos = main_scene._grid_to_local_pos(0, 0)
+	var front_sq1 = main_scene._grid_to_local_pos(0, 2)
+	var front_sq2 = main_scene._grid_to_local_pos(1, 2)
+	
+	# Clicking barn roof or footprint should hit barn
+	var hit_roof = main_scene._get_building_at_local_pos(barn_pos + Vector2(0, -60))
+	_assert(hit_roof == "barn", "Click on barn roof chooses barn")
+	var hit_footprint = main_scene._get_building_at_local_pos(barn_pos + Vector2(0, 30))
+	_assert(hit_footprint == "barn", "Click on barn footprint chooses barn")
+	
+	# Clicking the two squares in front of the barn must NOT hit barn
+	var hit_front1 = main_scene._get_building_at_local_pos(front_sq1)
+	_assert(hit_front1 == "", "Square in front of barn (0, 2) does not choose barn (got '%s')" % hit_front1)
+	var hit_front2 = main_scene._get_building_at_local_pos(front_sq2)
+	_assert(hit_front2 == "", "Square in front of barn (1, 2) does not choose barn (got '%s')" % hit_front2)
+	
+	# When clicking in front of the barn on (0, 2), barn modal must NOT open
+	main_scene.barn_modal.visible = false
+	var screen_pt = main_scene.plots_root.get_global_transform_with_canvas() * front_sq1
+	main_scene._handle_isometric_click(screen_pt)
+	_assert(not main_scene.barn_modal.visible, "Tapping green square in front of barn does not open Barn modal")
+	
 	main_scene.queue_free()

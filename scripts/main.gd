@@ -681,14 +681,20 @@ func _get_building_at_local_pos(local_pos: Vector2) -> String:
 		var base_cx = (bgx - bgy) * (ISO_W / 2.0) + origin_x
 		var base_cy = (bgx + bgy + 1.0) * (ISO_H / 2.0) + origin_y
 		
-		# Check building visual bounding box (tall structure extending upwards)
-		if local_pos.x >= (base_cx - 135.0) and local_pos.x <= (base_cx + 135.0) and \
-		   local_pos.y >= (base_cy - 250.0) and local_pos.y <= (base_cy + 35.0):
-			var dx = local_pos.x - origin_x
-			var dy = local_pos.y - origin_y
-			var tap_gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
-			var tap_gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
-			if tap_gx >= (bgx - 2) and tap_gx <= (bgx + 1) and tap_gy >= (bgy - 2) and tap_gy <= (bgy + 1):
+		var dx = local_pos.x - origin_x
+		var dy = local_pos.y - origin_y
+		var tap_gx = int(floor((dx / ISO_W) + (dy / ISO_H) + 0.5))
+		var tap_gy = int(floor((dy / ISO_H) - (dx / ISO_W) + 0.5))
+		
+		# Direct tap on one of the 4 footprint tiles
+		if tap_gx >= bgx and tap_gx <= (bgx + 1) and tap_gy >= bgy and tap_gy <= (bgy + 1):
+			return b_id
+		
+		# Tap on the upper structure (roof/chimney/walls) extending into the air.
+		# Never intercept clicks on tiles in front of or to the side of the building footprint.
+		if tap_gx <= (bgx + 1) and tap_gy <= (bgy + 1):
+			if local_pos.x >= (base_cx - 150.0) and local_pos.x <= (base_cx + 150.0) and \
+			   local_pos.y >= (base_cy - 280.0) and local_pos.y <= (base_cy + 65.0):
 				return b_id
 	return ""
 
@@ -1373,20 +1379,20 @@ func _render_plot(idx: int):
 				obj_sprite.visible = true
 				if b_id == "workshop":
 					obj_sprite.texture = tex_workshop
-					obj_sprite.scale = Vector2(0.38, 0.38)
-					obj_sprite.offset = Vector2(0, -320)
+					obj_sprite.scale = Vector2(0.42, 0.42)
+					obj_sprite.offset = Vector2(0, -180)
 					obj_sprite.modulate = Color.WHITE
 					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-75, -170)
+					badge.position = Vector2(-75, -230)
 					badge.text = "Carpenter's Workshop"
 					badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
 				elif b_id == "mill":
 					obj_sprite.texture = tex_mill
-					obj_sprite.scale = Vector2(0.40, 0.40)
-					obj_sprite.offset = Vector2(0, -320)
+					obj_sprite.scale = Vector2(0.55, 0.55)
+					obj_sprite.offset = Vector2(0, -32)
 					obj_sprite.modulate = Color.WHITE
 					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-75, -170)
+					badge.position = Vector2(-75, -190)
 					var m_b = GameState.buildings.get("mill", {})
 					if m_b.get("output_ready", 0) > 0:
 						badge.text = "Mill [Flour Ready!]"
@@ -1400,11 +1406,11 @@ func _render_plot(idx: int):
 						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
 				elif b_id == "bakery":
 					obj_sprite.texture = tex_bakery
-					obj_sprite.scale = Vector2(0.38, 0.38)
-					obj_sprite.offset = Vector2(0, -300)
+					obj_sprite.scale = Vector2(0.55, 0.55)
+					obj_sprite.offset = Vector2(0, -28)
 					obj_sprite.modulate = Color.WHITE
 					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-75, -170)
+					badge.position = Vector2(-75, -190)
 					var bk_b = GameState.buildings.get("bakery", {})
 					if bk_b.get("output_ready", 0) > 0:
 						badge.text = "Bakery [Bread Ready!]"
@@ -1418,11 +1424,11 @@ func _render_plot(idx: int):
 						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
 				else: # barn
 					obj_sprite.texture = tex_barn
-					obj_sprite.scale = Vector2(1.15, 1.15)
-					obj_sprite.offset = Vector2(0, -104)
+					obj_sprite.scale = Vector2(1.25, 1.25)
+					obj_sprite.offset = Vector2(0, -58)
 					obj_sprite.modulate = Color.WHITE
 					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-70, -165)
+					badge.position = Vector2(-70, -225)
 					badge.text = "Red Barn [Storage]"
 					badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
 			else:
@@ -1466,11 +1472,11 @@ func _render_plot(idx: int):
 			soil_sprite.visible = false
 			obj_sprite.visible = true
 			obj_sprite.texture = tex_barn
-			obj_sprite.scale = Vector2(1.15, 1.15)
-			obj_sprite.offset = Vector2(0, -104)
+			obj_sprite.scale = Vector2(1.25, 1.25)
+			obj_sprite.offset = Vector2(0, -58)
 			obj_sprite.modulate = Color.WHITE
 			node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-			badge.position = Vector2(-70, -165)
+			badge.position = Vector2(-70, -225)
 			badge.text = "Red Barn [Storage]"
 			badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
 		
@@ -3206,8 +3212,8 @@ func _is_local_pos_on_placement_ghost(local_pos: Vector2) -> bool:
 		return true
 	var base_cx = (placement_gx - placement_gy) * (ISO_W * 0.5)
 	var base_cy = (placement_gx + placement_gy + 1.0) * (ISO_H * 0.5) - 60.0
-	return local_pos.x >= (base_cx - 140.0) and local_pos.x <= (base_cx + 140.0) and \
-	       local_pos.y >= (base_cy - 260.0) and local_pos.y <= (base_cy + 50.0)
+	return local_pos.x >= (base_cx - 150.0) and local_pos.x <= (base_cx + 150.0) and \
+	       local_pos.y >= (base_cy - 280.0) and local_pos.y <= (base_cy + 65.0)
 
 func _is_single_tile_clear_for_building(building_id: String, sector_coord: String, gx: int, gy: int) -> bool:
 	var tiles = GameState.sector_tiles.get(sector_coord, [])
@@ -3324,7 +3330,7 @@ func _start_placement_mode(building_id: String):
 		badge.name = "GhostBadge"
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		badge.position = Vector2(-140, -185)
+		badge.position = Vector2(-140, -240)
 		badge.custom_minimum_size = Vector2(280, 32)
 		badge.add_theme_font_size_override("font_size", 14)
 		badge.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
@@ -3337,20 +3343,20 @@ func _start_placement_mode(building_id: String):
 	var spr = placement_ghost_node.get_node("GhostSprite") as Sprite2D
 	if building_id == "workshop":
 		spr.texture = tex_workshop
-		spr.scale = Vector2(0.38, 0.38)
-		spr.offset = Vector2(0, -320)
+		spr.scale = Vector2(0.42, 0.42)
+		spr.offset = Vector2(0, -180)
 	elif building_id == "barn":
 		spr.texture = tex_barn
-		spr.scale = Vector2(1.15, 1.15)
-		spr.offset = Vector2(0, -104)
+		spr.scale = Vector2(1.25, 1.25)
+		spr.offset = Vector2(0, -58)
 	elif building_id == "mill":
 		spr.texture = tex_mill
-		spr.scale = Vector2(0.40, 0.40)
-		spr.offset = Vector2(0, -320)
+		spr.scale = Vector2(0.55, 0.55)
+		spr.offset = Vector2(0, -32)
 	elif building_id == "bakery":
 		spr.texture = tex_bakery
-		spr.scale = Vector2(0.38, 0.38)
-		spr.offset = Vector2(0, -300)
+		spr.scale = Vector2(0.55, 0.55)
+		spr.offset = Vector2(0, -28)
 	elif building_id == "wooden_fence":
 		spr.texture = tex_fence
 		spr.scale = Vector2(0.65, 0.65)
