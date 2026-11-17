@@ -136,6 +136,8 @@ var dev_unlock_btn: Button
 # Buildings & Placeable Decorations Textures
 var tex_mill = preload("res://assets/objects/mill.png")
 var tex_bakery = preload("res://assets/objects/bakery.png")
+var tex_fence_sw = preload("res://assets/objects/fence_sw_ne.png")
+var tex_fence_nw = preload("res://assets/objects/fence_nw_se.png")
 var tex_fence = preload("res://assets/objects/wooden_fence.png")
 var tex_well = preload("res://assets/objects/stone_well.png")
 var tex_lantern = preload("res://assets/objects/lantern_post.png")
@@ -176,6 +178,7 @@ var placement_ghost_node: Node2D = null
 var placement_hud_banner: PanelContainer = null
 var placement_status_label: Label = null
 var placement_confirm_btn: Button = null
+var placement_rotate_btn: Button = null
 var placement_gx: int = 0
 var placement_gy: int = 0
 var placement_drag_offset: Vector2 = Vector2.ZERO
@@ -729,6 +732,22 @@ func _handle_isometric_click(screen_position: Vector2):
 	
 	var idx = GameData.get_farm_index(Vector2i(gx, gy))
 	if idx >= 0:
+		# In Tools mode: if clicked directly on an edge fence line, pick it up into Barn
+		if not is_placing_building and GameState.active_mode == "tools":
+			var tile_data = GameState.sector_tiles.get(GameState.current_sector_coord, [])
+			if idx < tile_data.size():
+				var t = tile_data[idx]
+				var t_fences: Array = t.get("fences", [])
+				if t_fences.size() > 0:
+					var tile_center = _grid_to_local_pos(gx, gy)
+					var hit_fence = false
+					if "sw_ne" in t_fences and local_pos.distance_to(tile_center + Vector2(40, 20)) < 28.0:
+						hit_fence = true
+					elif "nw_se" in t_fences and local_pos.distance_to(tile_center + Vector2(-40, 20)) < 28.0:
+						hit_fence = true
+					if hit_fence:
+						GameState.pickup_decoration(GameState.current_sector_coord, idx)
+						return
 		_on_plot_clicked(idx)
 
 func _build_isometric_grid():
@@ -819,6 +838,27 @@ func _build_isometric_grid():
 		obj_sprite.scale = Vector2(0.60, 0.60)
 		obj_sprite.visible = false
 		node.add_child(obj_sprite)
+		
+		# Layer 2b: Edge Line Fences (SW-NE and NW-SE)
+		var fence_sw = Sprite2D.new()
+		fence_sw.name = "Fence_SW_NE"
+		fence_sw.texture = tex_fence_sw
+		fence_sw.position = Vector2(40, 20)
+		fence_sw.scale = Vector2(0.5, 0.5)
+		fence_sw.offset = Vector2(0, -12)
+		fence_sw.z_index = 5
+		fence_sw.visible = false
+		node.add_child(fence_sw)
+		
+		var fence_nw = Sprite2D.new()
+		fence_nw.name = "Fence_NW_SE"
+		fence_nw.texture = tex_fence_nw
+		fence_nw.position = Vector2(-40, 20)
+		fence_nw.scale = Vector2(0.5, 0.5)
+		fence_nw.offset = Vector2(0, -12)
+		fence_nw.z_index = 5
+		fence_nw.visible = false
+		node.add_child(fence_nw)
 		
 		# Layer 3: Clean floating status badge
 		var badge = Label.new()
@@ -1369,6 +1409,14 @@ func _render_plot(idx: int):
 	
 	var tile = tiles[idx]
 	var type = tile.get("type", "grass")
+	
+	var fence_sw = node.get_node_or_null("Fence_SW_NE") as Sprite2D
+	var fence_nw = node.get_node_or_null("Fence_NW_SE") as Sprite2D
+	var fences: Array = tile.get("fences", [])
+	if fence_sw:
+		fence_sw.visible = ("sw_ne" in fences)
+	if fence_nw:
+		fence_nw.visible = ("nw_se" in fences)
 	
 	match type:
 		"building":
@@ -3203,6 +3251,10 @@ func _is_local_pos_on_placement_ghost(local_pos: Vector2) -> bool:
 	if placing_building_id in GameState.PLACEABLE_DECORATIONS:
 		if g.x == placement_gx and g.y == placement_gy:
 			return true
+		if placing_building_id in ["wooden_fence", "wooden_fence_nw"]:
+			var tile_center = _grid_to_local_pos(placement_gx, placement_gy)
+			var edge_mid = tile_center + (Vector2(40, 20) if placing_building_id == "wooden_fence" else Vector2(-40, 20))
+			return local_pos.distance_to(edge_mid) < 45.0
 		var base_cx = (placement_gx - placement_gy) * (ISO_W * 0.5)
 		var base_cy = (placement_gx + placement_gy + 0.5) * (ISO_H * 0.5) - 60.0
 		return local_pos.x >= (base_cx - 70.0) and local_pos.x <= (base_cx + 70.0) and \
@@ -3358,9 +3410,15 @@ func _start_placement_mode(building_id: String):
 		spr.scale = Vector2(0.55, 0.55)
 		spr.offset = Vector2(0, -28)
 	elif building_id == "wooden_fence":
-		spr.texture = tex_fence
-		spr.scale = Vector2(0.65, 0.65)
-		spr.offset = Vector2(0, -60)
+		spr.texture = tex_fence_sw
+		spr.position = Vector2(40, 20)
+		spr.scale = Vector2(0.5, 0.5)
+		spr.offset = Vector2(0, -12)
+	elif building_id == "wooden_fence_nw":
+		spr.texture = tex_fence_nw
+		spr.position = Vector2(-40, 20)
+		spr.scale = Vector2(0.5, 0.5)
+		spr.offset = Vector2(0, -12)
 	elif building_id == "stone_well":
 		spr.texture = tex_well
 		spr.scale = Vector2(0.65, 0.65)
@@ -3444,6 +3502,13 @@ func _show_placement_banner():
 			nbtn.pressed.connect(func(): _nudge_placement_ghost(ndx, ndy))
 			controls_row.add_child(nbtn)
 		
+		placement_rotate_btn = Button.new()
+		placement_rotate_btn.name = "RotatePlaceBtn"
+		placement_rotate_btn.text = "Rotate [/]"
+		placement_rotate_btn.custom_minimum_size = Vector2(88, 48) if mobile_ui else Vector2(88, 38)
+		placement_rotate_btn.pressed.connect(_on_placement_rotate_pressed)
+		controls_row.add_child(placement_rotate_btn)
+		
 		placement_confirm_btn = Button.new()
 		placement_confirm_btn.name = "ConfirmPlaceBtn"
 		placement_confirm_btn.text = "Place Here"
@@ -3490,7 +3555,38 @@ func _show_placement_banner():
 			placement_hud_banner.offset_bottom = -16.0
 			placement_hud_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	
+	if placement_rotate_btn:
+		var is_f = (placing_building_id in ["wooden_fence", "wooden_fence_nw"])
+		placement_rotate_btn.visible = is_f
+		if is_f:
+			placement_rotate_btn.text = "Rotate [/]" if placing_building_id == "wooden_fence" else "Rotate [\\]"
+	
 	placement_hud_banner.visible = true
+
+func _on_placement_rotate_pressed():
+	if not is_placing_building:
+		return
+	if placing_building_id == "wooden_fence":
+		placing_building_id = "wooden_fence_nw"
+	elif placing_building_id == "wooden_fence_nw":
+		placing_building_id = "wooden_fence"
+	
+	var spr = placement_ghost_node.get_node("GhostSprite") as Sprite2D
+	if placing_building_id == "wooden_fence":
+		spr.texture = tex_fence_sw
+		spr.position = Vector2(40, 20)
+		spr.scale = Vector2(0.5, 0.5)
+		spr.offset = Vector2(0, -12)
+	elif placing_building_id == "wooden_fence_nw":
+		spr.texture = tex_fence_nw
+		spr.position = Vector2(-40, 20)
+		spr.scale = Vector2(0.5, 0.5)
+		spr.offset = Vector2(0, -12)
+	
+	if placement_rotate_btn:
+		placement_rotate_btn.text = "Rotate [/]" if placing_building_id == "wooden_fence" else "Rotate [\\]"
+	
+	_update_placement_ghost_pos()
 
 func _update_placement_ghost_pos():
 	if not is_placing_building or placement_ghost_node == null:
@@ -3513,7 +3609,30 @@ func _update_placement_ghost_pos():
 		var poly00 = placement_ghost_node.get_node_or_null("Footprint_0_0") as Polygon2D
 		var valid = GameState.can_place_decoration(placing_building_id, GameState.current_sector_coord, gx, gy)
 		if poly00:
-			poly00.color = Color(0.35, 0.95, 0.35, 0.45) if valid else Color(1.0, 0.30, 0.30, 0.50)
+			if placing_building_id == "wooden_fence":
+				# SW-NE line along South-East edge: (0, 40) to (80, 0)
+				poly00.polygon = PackedVector2Array([
+					Vector2(-3, 40),
+					Vector2(3, 43),
+					Vector2(83, 3),
+					Vector2(77, -3)
+				])
+			elif placing_building_id == "wooden_fence_nw":
+				# NW-SE line along South-West edge: (-80, 0) to (0, 40)
+				poly00.polygon = PackedVector2Array([
+					Vector2(-83, 3),
+					Vector2(-77, -3),
+					Vector2(3, 37),
+					Vector2(-3, 43)
+				])
+			else:
+				poly00.polygon = PackedVector2Array([
+					Vector2(0, -ISO_H * 0.48),
+					Vector2(ISO_W * 0.48, 0),
+					Vector2(0, ISO_H * 0.48),
+					Vector2(-ISO_W * 0.48, 0)
+				])
+			poly00.color = Color(0.35, 0.95, 0.35, 0.55) if valid else Color(1.0, 0.30, 0.30, 0.55)
 		var item_info = GameData.get_item_info(placing_building_id)
 		var d_name = item_info.get("name", "Decoration")
 		if valid:

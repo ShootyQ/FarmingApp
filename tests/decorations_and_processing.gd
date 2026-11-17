@@ -40,6 +40,7 @@ func _test_pricing_and_recipes(game_data):
 	_assert(game_data.CRAFTING_RECIPES.has("mill"), "CRAFTING_RECIPES must contain 'mill'")
 	_assert(game_data.CRAFTING_RECIPES.has("bakery"), "CRAFTING_RECIPES must contain 'bakery'")
 	_assert(game_data.CRAFTING_RECIPES.has("wooden_fence"), "CRAFTING_RECIPES must contain 'wooden_fence'")
+	_assert(game_data.CRAFTING_RECIPES.has("wooden_fence_nw"), "CRAFTING_RECIPES must contain 'wooden_fence_nw'")
 	_assert(game_data.CRAFTING_RECIPES.has("stone_well"), "CRAFTING_RECIPES must contain 'stone_well'")
 	_assert(game_data.CRAFTING_RECIPES.has("lantern_post"), "CRAFTING_RECIPES must contain 'lantern_post'")
 	_assert(game_data.CRAFTING_RECIPES.has("planter_box"), "CRAFTING_RECIPES must contain 'planter_box'")
@@ -51,29 +52,73 @@ func _test_decoration_crafting_and_placement(game_state, game_data):
 	game_state.stone = 500
 	game_state.coins = 2000
 	
+	# 1. Test SW-NE fence crafting and placement
 	var crafted = game_state.craft_recipe("wooden_fence")
-	_assert(crafted, "Crafting wooden fence must succeed")
+	_assert(crafted, "Crafting wooden fence (SW-NE) must succeed")
 	_assert(game_state.get_barn_item_count("wooden_fence") >= 2, "Wooden fence yields 2 sections")
 	
 	# Clear tile (3, 0) so it's grass ready for placement
-	var idx = game_data.get_farm_index(Vector2i(3, 0))
-	game_state.sector_tiles["1,1"][idx] = {"type": "grass"}
+	var idx_3_0 = game_data.get_farm_index(Vector2i(3, 0))
+	game_state.sector_tiles["1,1"][idx_3_0] = {"type": "grass"}
 	
-	var can_place = game_state.can_place_decoration("wooden_fence", "1,1", 3, 0)
-	_assert(can_place, "can_place_decoration must be true for clear plot")
+	var can_place_sw = game_state.can_place_decoration("wooden_fence", "1,1", 3, 0)
+	_assert(can_place_sw, "can_place_decoration must be true for SW-NE fence on grass")
 	
-	var placed = game_state.place_decoration("wooden_fence", "1,1", 3, 0)
-	_assert(placed, "place_decoration must succeed")
+	var placed_sw = game_state.place_decoration("wooden_fence", "1,1", 3, 0)
+	_assert(placed_sw, "place_decoration must succeed for SW-NE fence")
 	
-	var tile = game_state.sector_tiles["1,1"][idx]
-	_assert(tile.get("type") == "decoration", "Tile must have type 'decoration'")
-	_assert(tile.get("item_id") == "wooden_fence", "Tile must have item_id 'wooden_fence'")
+	var tile_3_0 = game_state.sector_tiles["1,1"][idx_3_0]
+	_assert(tile_3_0.get("type") == "grass", "Tile (3, 0) MUST remain 'grass' when edge fence is placed")
+	_assert("sw_ne" in tile_3_0.get("fences", []), "Tile (3, 0) must have 'sw_ne' in fences")
 	
-	var barn_before = game_state.get_barn_item_count("wooden_fence")
-	game_state.interact_with_tile("1,1", idx, "tools")
-	var barn_after = game_state.get_barn_item_count("wooden_fence")
-	_assert(barn_after == barn_before + 1, "Picking up decoration in tools mode returns it to Barn")
-	_assert(game_state.sector_tiles["1,1"][idx].get("type") == "grass", "Tile becomes grass after picking up decoration")
+	# Verify adjacent square (3, 1) is completely usable
+	var idx_3_1 = game_data.get_farm_index(Vector2i(3, 1))
+	game_state.sector_tiles["1,1"][idx_3_1] = {"type": "grass"}
+	game_state.interact_with_tile("1,1", idx_3_1, "tools")
+	var tile_3_1 = game_state.sector_tiles["1,1"][idx_3_1]
+	_assert(tile_3_1.get("type") == "preparing", "Adjacent green square (3, 1) right next to fence is fully usable for hoeing")
+	
+	# Verify tile (3, 0) itself is also fully usable for farming with fence on its edge
+	game_state.interact_with_tile("1,1", idx_3_0, "tools")
+	tile_3_0 = game_state.sector_tiles["1,1"][idx_3_0]
+	_assert(tile_3_0.get("type") == "preparing", "Tile (3, 0) with fence on edge can be hoed into preparing soil")
+	_assert("sw_ne" in tile_3_0.get("fences", []), "Fence 'sw_ne' remains intact after hoeing tile")
+	
+	# Pick up fence into Barn
+	var barn_fence_before = game_state.get_barn_item_count("wooden_fence")
+	var pickup_sw = game_state.pickup_decoration("1,1", idx_3_0)
+	_assert(pickup_sw, "pickup_decoration on tile with fence succeeds")
+	_assert(game_state.get_barn_item_count("wooden_fence") == barn_fence_before + 1, "Picked up wooden_fence returned to Barn")
+	_assert(not ("sw_ne" in tile_3_0.get("fences", [])), "Fence removed from tile")
+	
+	# 2. Test NW-SE fence crafting and placement
+	var crafted_nw = game_state.craft_recipe("wooden_fence_nw")
+	_assert(crafted_nw, "Crafting wooden fence (NW-SE) must succeed")
+	_assert(game_state.get_barn_item_count("wooden_fence_nw") >= 2, "Wooden fence NW yields 2 sections")
+	
+	game_state.sector_tiles["1,1"][idx_3_0] = {"type": "grass"}
+	var placed_nw = game_state.place_decoration("wooden_fence_nw", "1,1", 3, 0)
+	_assert(placed_nw, "place_decoration for wooden_fence_nw succeeds")
+	tile_3_0 = game_state.sector_tiles["1,1"][idx_3_0]
+	_assert("nw_se" in tile_3_0.get("fences", []), "Tile (3, 0) has 'nw_se' fence")
+	
+	var barn_nw_before = game_state.get_barn_item_count("wooden_fence_nw")
+	game_state.pickup_decoration("1,1", idx_3_0)
+	_assert(game_state.get_barn_item_count("wooden_fence_nw") == barn_nw_before + 1, "Picked up wooden_fence_nw returned to Barn")
+	
+	# 3. Test standalone 1x1 decoration (e.g. lantern_post)
+	game_state.craft_recipe("lantern_post")
+	game_state.sector_tiles["1,1"][idx_3_0] = {"type": "grass"}
+	var placed_lantern = game_state.place_decoration("lantern_post", "1,1", 3, 0)
+	_assert(placed_lantern, "Lantern post placed on (3, 0)")
+	tile_3_0 = game_state.sector_tiles["1,1"][idx_3_0]
+	_assert(tile_3_0.get("type") == "decoration", "Standalone decoration sets tile type to 'decoration'")
+	_assert(tile_3_0.get("item_id") == "lantern_post", "Tile has item_id 'lantern_post'")
+	
+	var barn_lantern_before = game_state.get_barn_item_count("lantern_post")
+	game_state.interact_with_tile("1,1", idx_3_0, "tools")
+	_assert(game_state.get_barn_item_count("lantern_post") == barn_lantern_before + 1, "Tapping standalone decoration in tools mode returns to Barn")
+	_assert(game_state.sector_tiles["1,1"][idx_3_0].get("type") == "grass", "Tile becomes grass after picking up standalone decoration")
 
 func _test_stone_well_growth_boost(game_state, game_data):
 	game_state.wood = 500

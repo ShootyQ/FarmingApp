@@ -18,7 +18,7 @@ signal production_updated
 signal buildings_updated
 signal mode_changed(new_mode: String)
 
-const PLACEABLE_DECORATIONS = ["wooden_fence", "stone_well", "lantern_post", "planter_box"]
+const PLACEABLE_DECORATIONS = ["wooden_fence", "wooden_fence_nw", "stone_well", "lantern_post", "planter_box"]
 
 var coins: int = 150
 var wood: int = 10
@@ -398,6 +398,17 @@ func can_place_decoration(item_id: String, sector_coord: String, gx: int, gy: in
 		return false
 	var t = tiles[idx]
 	var t_type = t.get("type", "grass")
+	
+	# Fences sit on the grid line/boundary edge and keep the tile fully usable
+	if item_id in ["wooden_fence", "wooden_fence_nw"]:
+		if t_type in ["building", "obstacle"]:
+			return false
+		var dir = "nw_se" if item_id == "wooden_fence_nw" else "sw_ne"
+		var fences = t.get("fences", [])
+		if dir in fences:
+			return false # Already has fence in this direction
+		return true
+		
 	if t_type == "grass":
 		return true
 	if t_type == "soil" and t.get("state", "empty") == "empty":
@@ -411,17 +422,26 @@ func place_decoration(item_id: String, sector_coord: String, gx: int, gy: int) -
 	var tiles = sector_tiles.get(sector_coord, [])
 	if not remove_from_barn(item_id, 1):
 		return false
-	tiles[idx] = {
-		"type": "decoration",
-		"item_id": item_id,
-		"gx": gx,
-		"gy": gy
-	}
+	
+	if item_id in ["wooden_fence", "wooden_fence_nw"]:
+		var dir = "nw_se" if item_id == "wooden_fence_nw" else "sw_ne"
+		var t = tiles[idx]
+		var fences: Array = t.get("fences", []).duplicate()
+		if not (dir in fences):
+			fences.append(dir)
+		t["fences"] = fences
+	else:
+		tiles[idx] = {
+			"type": "decoration",
+			"item_id": item_id,
+			"gx": gx,
+			"gy": gy
+		}
 	tile_updated.emit(sector_coord, idx)
 	save_game()
 	state_updated.emit()
 	barn_updated.emit()
-	message_broadcast.emit("Placed %s on farm plot!" % GameData.get_item_info(item_id)["name"], true)
+	message_broadcast.emit("Placed %s on the grid line!" % GameData.get_item_info(item_id)["name"], true)
 	return true
 
 func pickup_decoration(sector_coord: String, tile_idx: int) -> bool:
@@ -429,6 +449,25 @@ func pickup_decoration(sector_coord: String, tile_idx: int) -> bool:
 	if tile_idx < 0 or tile_idx >= tiles.size():
 		return false
 	var tile = tiles[tile_idx]
+	
+	# If tile has a fence on its edge
+	var fences: Array = tile.get("fences", []).duplicate()
+	if fences.size() > 0:
+		var dir = fences.pop_back()
+		tile["fences"] = fences
+		var item_id = "wooden_fence_nw" if dir == "nw_se" else "wooden_fence"
+		if not add_to_barn(item_id, 1):
+			fences.append(dir) # rollback
+			tile["fences"] = fences
+			message_broadcast.emit("Barn is full! Cannot pick up fence.", false)
+			return false
+		tile_updated.emit(sector_coord, tile_idx)
+		save_game()
+		state_updated.emit()
+		barn_updated.emit()
+		message_broadcast.emit("Picked up %s into Barn!" % GameData.get_item_info(item_id)["name"], true)
+		return true
+		
 	if tile.get("type") != "decoration":
 		return false
 	var item_id = tile.get("item_id", "")
@@ -680,6 +719,7 @@ func _handle_tap_obstacle(sector_coord: String, tile_idx: int, tile: Dictionary)
 	return true
 
 func tiles_become_soil(tile: Dictionary):
+	var saved_fences = tile.get("fences", [])
 	tile.clear()
 	tile["type"] = "soil"
 	tile["state"] = "empty"
@@ -687,6 +727,8 @@ func tiles_become_soil(tile: Dictionary):
 	tile["is_mutated"] = false
 	tile["plant_time"] = 0.0
 	tile["grow_duration"] = 0.0
+	if saved_fences.size() > 0:
+		tile["fences"] = saved_fences
 
 func get_preparation_count() -> int:
 	var count = 0
@@ -716,8 +758,11 @@ func _handle_tap_grass(_sector_coord: String, _tile_idx: int, tile: Dictionary) 
 		message_broadcast.emit("Need %d coins to prepare this plot." % cost, false)
 		return false
 	coins -= cost
+	var saved_fences = tile.get("fences", [])
 	tile.clear()
 	tile.merge({"type": "preparing", "prepare_started_at": Time.get_unix_time_from_system(), "prepare_duration": GameData.PREPARATION_SECONDS})
+	if saved_fences.size() > 0:
+		tile["fences"] = saved_fences
 	message_broadcast.emit("Preparing soil — 5:00 (-%d coins)" % cost, true)
 	return true
 
@@ -1111,6 +1156,15 @@ func _apply_save_data(parsed: Dictionary):
 	for cid in GameData.CROPS:
 		if not cid in seed_inventory:
 			seed_inventory[cid] = 0
+	
+	# Migrate legacy fence tiles to edge fences so plots remain usable
+	for s_tiles in sector_tiles.values():
+		for t in s_tiles:
+			if t.get("type") == "decoration" and t.get("item_id") in ["wooden_fence", "wooden_fence_nw"]:
+				var f_dir = "nw_se" if t.get("item_id") == "wooden_fence_nw" else "sw_ne"
+				t["type"] = "grass"
+				t["fences"] = [f_dir]
+				t.erase("item_id")
 	
 	# Calculate offline crop growth
 	update_crop_timers()

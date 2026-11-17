@@ -173,10 +173,18 @@ const ITEMS = {
 		"desc": "Spooky glowing purple pumpkin with mysterious essence."
 	},
 	"wooden_fence": {
-		"name": "Rustic Picket Fence",
+		"name": "Picket Fence (SW–NE)",
 		"sell_value": 35,
-		"icon": "res://assets/objects/wooden_fence.png",
-		"desc": "Hand-carved cedar fence post section to beautify plots."
+		"icon": "res://assets/objects/fence_sw_ne.png",
+		"desc": "Rustic cedar picket fence aligned along the SW–NE grid line ( / ).",
+		"line_dir": "sw_ne"
+	},
+	"wooden_fence_nw": {
+		"name": "Picket Fence (NW–SE)",
+		"sell_value": 35,
+		"icon": "res://assets/objects/fence_nw_se.png",
+		"desc": "Rustic cedar picket fence aligned along the NW–SE grid line ( \\ ).",
+		"line_dir": "nw_se"
 	},
 	"stone_well": {
 		"name": "Cobblestone Well",
@@ -233,11 +241,21 @@ const WORKSHOP_CONSTRUCTION_COST = {
 const CRAFTING_RECIPES = {
 	"wooden_fence": {
 		"id": "wooden_fence",
-		"name": "Rustic Picket Fence",
+		"name": "Picket Fence (SW–NE)",
 		"category": "Decor",
-		"desc": "Hand-carved cedar fence post section to beautify plots.",
+		"desc": "Craft 2 cedar picket fence sections aligned along the SW–NE grid line ( / ).",
 		"cost": {"wood": 4, "coins": 10},
 		"yield_item": "wooden_fence",
+		"yield_count": 2,
+		"is_unique": false
+	},
+	"wooden_fence_nw": {
+		"id": "wooden_fence_nw",
+		"name": "Picket Fence (NW–SE)",
+		"category": "Decor",
+		"desc": "Craft 2 cedar picket fence sections aligned along the NW–SE grid line ( \\ ).",
+		"cost": {"wood": 4, "coins": 10},
+		"yield_item": "wooden_fence_nw",
 		"yield_count": 2,
 		"is_unique": false
 	},
