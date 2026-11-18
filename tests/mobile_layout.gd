@@ -24,6 +24,8 @@ func _run():
 	_assert_fits(farm.music_btn, width)
 	assert(farm.music_btn.size.y >= 48, "Music button touch target height")
 	_assert_fits(farm.dev_unlock_btn, width)
+	_assert_fits(farm.toggle_buildings_btn, width)
+	assert(farm.toggle_buildings_btn.size.y >= 48, "Toggle buildings touch target height")
 	_assert_fits(farm.mode_switcher_bar, width)
 	_assert_fits(farm.mode_plant_btn, width)
 	_assert_fits(farm.mode_tools_btn, width)

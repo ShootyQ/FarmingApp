@@ -187,6 +187,10 @@ var placement_gy: int = 0
 var placement_drag_offset: Vector2 = Vector2.ZERO
 var placement_touch_started_on_ghost: bool = false
 
+# Building Flatten / Roof Toggle Mode (Hide roofs to access tiles behind them)
+var buildings_flattened: bool = false
+var toggle_buildings_btn: Button = null
+
 # Obstacle Variations: Weeds (4), Logs (2), Rocks (3)
 var tex_weeds = [
 	preload("res://assets/objects/weed_0.png"), # Thistle
@@ -401,6 +405,8 @@ func _setup_mobile_hud():
 		music_btn.text = "Music" if GameState.music_enabled else "Muted"
 	if dev_unlock_btn:
 		dev_unlock_btn.custom_minimum_size.y = 48
+	if toggle_buildings_btn:
+		toggle_buildings_btn.custom_minimum_size.y = 48
 	if mode_plant_btn:
 		mode_plant_btn.custom_minimum_size.y = 48
 	if mode_tools_btn:
@@ -567,6 +573,10 @@ func _unhandled_input(event: InputEvent):
 			_set_active_mode("tools")
 			get_viewport().set_input_as_handled()
 			return
+		elif event.keycode == KEY_H:
+			_toggle_buildings_flattened()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventScreenTouch and event.pressed:
 		if touch_points.is_empty():
 			touch_start = event.position
@@ -660,19 +670,20 @@ func _setup_zoom_controls():
 	var controls = HBoxContainer.new()
 	controls.name = "ZoomControls"
 	controls.alignment = BoxContainer.ALIGNMENT_CENTER if mobile_ui else BoxContainer.ALIGNMENT_END
-	controls.add_theme_constant_override("separation", 8)
+	controls.add_theme_constant_override("separation", 4 if mobile_ui else 8)
 	$HUD/Margin/VBox.add_child(controls)
 	$HUD/Margin/VBox.move_child(controls, 2)
 	var fullscreen_btn = Button.new()
-	fullscreen_btn.text = "Full screen"
-	fullscreen_btn.custom_minimum_size = Vector2(116, 48)
+	fullscreen_btn.text = "Full" if mobile_ui else "Full screen"
+	fullscreen_btn.custom_minimum_size = Vector2(52, 48) if mobile_ui else Vector2(116, 48)
+	fullscreen_btn.add_theme_font_size_override("font_size", 14 if mobile_ui else 16)
 	fullscreen_btn.pressed.connect(_toggle_fullscreen)
 	controls.add_child(fullscreen_btn)
 	for caption in ["−", "100% Reset", "+"]:
 		var button = Button.new()
-		button.text = caption
-		button.custom_minimum_size = Vector2(48, 48) if mobile_ui else Vector2(64, 56)
-		button.add_theme_font_size_override("font_size", 18 if mobile_ui else 22)
+		button.text = ("100%" if mobile_ui else caption) if caption == "100% Reset" else caption
+		button.custom_minimum_size = (Vector2(40, 48) if caption != "100% Reset" else Vector2(54, 48)) if mobile_ui else (Vector2(48, 48) if caption != "100% Reset" else Vector2(64, 56))
+		button.add_theme_font_size_override("font_size", 14 if (mobile_ui and caption == "100% Reset") else (18 if mobile_ui else 22))
 		controls.add_child(button)
 		if caption == "100% Reset":
 			zoom_reset_btn = button
@@ -683,6 +694,32 @@ func _setup_zoom_controls():
 		else:
 			var factor = 1.2 if caption == "+" else 1.0 / 1.2
 			button.pressed.connect(func(): _zoom_at(camera.zoom.x * factor, get_viewport_rect().size * 0.5))
+	
+	toggle_buildings_btn = Button.new()
+	toggle_buildings_btn.name = "ToggleBuildingsBtn"
+	toggle_buildings_btn.text = "Roofs: ON"
+	toggle_buildings_btn.tooltip_text = "Flatten building roofs to see and interact with tiles behind them"
+	toggle_buildings_btn.custom_minimum_size = Vector2(80, 48) if mobile_ui else Vector2(110, 56)
+	toggle_buildings_btn.add_theme_font_size_override("font_size", 13 if mobile_ui else 16)
+	toggle_buildings_btn.pressed.connect(_toggle_buildings_flattened)
+	controls.add_child(toggle_buildings_btn)
+
+func _toggle_buildings_flattened():
+	buildings_flattened = not buildings_flattened
+	_update_toggle_buildings_btn_text()
+	for i in range(plot_nodes.size()):
+		var tiles = GameState.sector_tiles.get(GameState.current_sector_coord, [])
+		if i < tiles.size() and tiles[i].get("type", "") in ["building", "barn"]:
+			_render_plot(i)
+	_show_message("Building roofs hidden — tiles behind are fully accessible!" if buildings_flattened else "Building roofs restored", true)
+
+func _update_toggle_buildings_btn_text():
+	if toggle_buildings_btn:
+		toggle_buildings_btn.text = "Roofs: OFF" if buildings_flattened else "Roofs: ON"
+		if buildings_flattened:
+			toggle_buildings_btn.modulate = Color(1.0, 0.90, 0.35, 1.0)
+		else:
+			toggle_buildings_btn.modulate = Color(1.0, 1.0, 1.0, 1.0)
 
 func _get_building_at_local_pos(local_pos: Vector2) -> String:
 	var building_keys = ["workshop", "barn", "mill", "bakery"]
@@ -707,6 +744,10 @@ func _get_building_at_local_pos(local_pos: Vector2) -> String:
 		# Direct tap on one of the 4 footprint tiles
 		if tap_gx >= bgx and tap_gx <= (bgx + 1) and tap_gy >= bgy and tap_gy <= (bgy + 1):
 			return b_id
+		
+		# If roofs are flattened/hidden, do NOT intercept clicks on tiles behind them!
+		if buildings_flattened:
+			continue
 		
 		# Tap on the upper structure (roof/chimney/walls) extending into the air.
 		# Never intercept clicks on tiles in front of or to the side of the building footprint.
@@ -845,6 +886,18 @@ func _build_isometric_grid():
 		soil_sprite.position = Vector2.ZERO
 		soil_sprite.visible = false
 		node.add_child(soil_sprite)
+		
+		# Layer 1b: Flat Building Foundation (when roofs are flattened)
+		var foundation = Polygon2D.new()
+		foundation.name = "Foundation"
+		foundation.polygon = PackedVector2Array([
+			Vector2(0, -ISO_H * 0.48),
+			Vector2(ISO_W * 0.48, 0),
+			Vector2(0, ISO_H * 0.48),
+			Vector2(-ISO_W * 0.48, 0)
+		])
+		foundation.visible = false
+		node.add_child(foundation)
 		
 		# Layer 2: Standing Object Sprite (Tree Stump, Boulder, Crop, Weed)
 		var obj_sprite = Sprite2D.new()
@@ -1372,6 +1425,7 @@ func _update_music_btn_text():
 
 func _refresh_ui():
 	_update_music_btn_text()
+	_update_toggle_buildings_btn_text()
 	_update_mode_switcher_ui()
 	if tool_effects and effect_sector != GameState.current_sector_coord:
 		tool_effects.clear()
@@ -1450,71 +1504,107 @@ func _render_plot(idx: int):
 	if fence_nw:
 		fence_nw.visible = ("nw_se" in fences)
 	
+	var foundation = node.get_node_or_null("Foundation") as Polygon2D
+	if foundation:
+		foundation.visible = false
+	
 	match type:
 		"building":
 			var b_id = tile.get("building_id", "barn")
 			var is_origin = tile.get("is_origin", false)
-			if is_origin:
-				soil_sprite.visible = false
-				obj_sprite.visible = true
-				if b_id == "workshop":
-					obj_sprite.texture = tex_workshop
-					obj_sprite.scale = Vector2(0.42, 0.42)
-					obj_sprite.offset = Vector2(0, -180)
-					obj_sprite.modulate = Color.WHITE
-					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-75, -230)
-					badge.text = "Carpenter's Workshop"
-					badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
-				elif b_id == "mill":
-					obj_sprite.texture = tex_mill
-					obj_sprite.scale = Vector2(0.55, 0.55)
-					obj_sprite.offset = Vector2(0, -32)
-					obj_sprite.modulate = Color.WHITE
-					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-75, -190)
-					var m_b = GameState.buildings.get("mill", {})
-					if m_b.get("output_ready", 0) > 0:
-						badge.text = "Mill [Flour Ready!]"
-						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
-					elif m_b.get("is_processing", false):
-						var left = max(0.0, float(m_b.get("process_started_at", 0)) + float(m_b.get("process_duration", 300)) - Time.get_unix_time_from_system())
-						badge.text = "Milling (%s)" % GameData.format_time(left)
-						badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
-					else:
-						badge.text = "Windmill [Idle]"
-						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
-				elif b_id == "bakery":
-					obj_sprite.texture = tex_bakery
-					obj_sprite.scale = Vector2(0.55, 0.55)
-					obj_sprite.offset = Vector2(0, -28)
-					obj_sprite.modulate = Color.WHITE
-					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-75, -190)
-					var bk_b = GameState.buildings.get("bakery", {})
-					if bk_b.get("output_ready", 0) > 0:
-						badge.text = "Bakery [Bread Ready!]"
-						badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
-					elif bk_b.get("is_processing", false):
-						var left = max(0.0, float(bk_b.get("process_started_at", 0)) + float(bk_b.get("process_duration", 600)) - Time.get_unix_time_from_system())
-						badge.text = "Baking (%s)" % GameData.format_time(left)
-						badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
-					else:
-						badge.text = "Artisan Bakery [Idle]"
-						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
-				else: # barn
-					obj_sprite.texture = tex_barn
-					obj_sprite.scale = Vector2(1.25, 1.25)
-					obj_sprite.offset = Vector2(0, -58)
-					obj_sprite.modulate = Color.WHITE
-					node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-					badge.position = Vector2(-70, -225)
-					badge.text = "Red Barn [Storage]"
-					badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
-			else:
+			if buildings_flattened:
 				soil_sprite.visible = false
 				obj_sprite.visible = false
-				badge.text = ""
+				if foundation:
+					foundation.visible = true
+					match b_id:
+						"workshop":
+							foundation.color = Color(0.55, 0.42, 0.28, 0.85)
+						"mill":
+							foundation.color = Color(0.42, 0.45, 0.50, 0.85)
+						"bakery":
+							foundation.color = Color(0.62, 0.36, 0.24, 0.85)
+						_:
+							foundation.color = Color(0.58, 0.22, 0.18, 0.85)
+				if is_origin:
+					badge.position = Vector2(-75, -20)
+					match b_id:
+						"workshop":
+							badge.text = "[Workshop]"
+							badge.modulate = Color(1.0, 0.92, 0.70, 1.0)
+						"mill":
+							badge.text = "[Windmill]"
+							badge.modulate = Color(0.85, 0.95, 1.0, 1.0)
+						"bakery":
+							badge.text = "[Bakery]"
+							badge.modulate = Color(1.0, 0.90, 0.75, 1.0)
+						_:
+							badge.text = "[Red Barn]"
+							badge.modulate = Color(1.0, 0.85, 0.75, 1.0)
+				else:
+					badge.text = ""
+			else:
+				if is_origin:
+					soil_sprite.visible = false
+					obj_sprite.visible = true
+					if b_id == "workshop":
+						obj_sprite.texture = tex_workshop
+						obj_sprite.scale = Vector2(0.42, 0.42)
+						obj_sprite.offset = Vector2(0, -180)
+						obj_sprite.modulate = Color.WHITE
+						node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+						badge.position = Vector2(-75, -230)
+						badge.text = "Carpenter's Workshop"
+						badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
+					elif b_id == "mill":
+						obj_sprite.texture = tex_mill
+						obj_sprite.scale = Vector2(0.55, 0.55)
+						obj_sprite.offset = Vector2(0, -32)
+						obj_sprite.modulate = Color.WHITE
+						node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+						badge.position = Vector2(-75, -190)
+						var m_b = GameState.buildings.get("mill", {})
+						if m_b.get("output_ready", 0) > 0:
+							badge.text = "Mill [Flour Ready!]"
+							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+						elif m_b.get("is_processing", false):
+							var left = max(0.0, float(m_b.get("process_started_at", 0)) + float(m_b.get("process_duration", 300)) - Time.get_unix_time_from_system())
+							badge.text = "Milling (%s)" % GameData.format_time(left)
+							badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+						else:
+							badge.text = "Windmill [Idle]"
+							badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
+					elif b_id == "bakery":
+						obj_sprite.texture = tex_bakery
+						obj_sprite.scale = Vector2(0.55, 0.55)
+						obj_sprite.offset = Vector2(0, -28)
+						obj_sprite.modulate = Color.WHITE
+						node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+						badge.position = Vector2(-75, -190)
+						var bk_b = GameState.buildings.get("bakery", {})
+						if bk_b.get("output_ready", 0) > 0:
+							badge.text = "Bakery [Bread Ready!]"
+							badge.modulate = Color(1.0, 1.0, 0.4, 1.0)
+						elif bk_b.get("is_processing", false):
+							var left = max(0.0, float(bk_b.get("process_started_at", 0)) + float(bk_b.get("process_duration", 600)) - Time.get_unix_time_from_system())
+							badge.text = "Baking (%s)" % GameData.format_time(left)
+							badge.modulate = Color(0.7, 1.0, 0.7, 1.0)
+						else:
+							badge.text = "Artisan Bakery [Idle]"
+							badge.modulate = Color(0.95, 0.88, 0.65, 1.0)
+					else: # barn
+						obj_sprite.texture = tex_barn
+						obj_sprite.scale = Vector2(1.25, 1.25)
+						obj_sprite.offset = Vector2(0, -58)
+						obj_sprite.modulate = Color.WHITE
+						node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+						badge.position = Vector2(-70, -225)
+						badge.text = "Red Barn [Storage]"
+						badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
+				else:
+					soil_sprite.visible = false
+					obj_sprite.visible = false
+					badge.text = ""
 		
 		"decoration":
 			soil_sprite.visible = false
@@ -1549,16 +1639,26 @@ func _render_plot(idx: int):
 			badge.modulate = Color(0.9, 0.95, 1.0, 0.95)
 		
 		"barn":
-			soil_sprite.visible = false
-			obj_sprite.visible = true
-			obj_sprite.texture = tex_barn
-			obj_sprite.scale = Vector2(1.25, 1.25)
-			obj_sprite.offset = Vector2(0, -58)
-			obj_sprite.modulate = Color.WHITE
-			node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
-			badge.position = Vector2(-70, -225)
-			badge.text = "Red Barn [Storage]"
-			badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
+			if buildings_flattened:
+				soil_sprite.visible = false
+				obj_sprite.visible = false
+				if foundation:
+					foundation.visible = true
+					foundation.color = Color(0.58, 0.22, 0.18, 0.85)
+				badge.position = Vector2(-75, -20)
+				badge.text = "[Red Barn]"
+				badge.modulate = Color(1.0, 0.85, 0.75, 1.0)
+			else:
+				soil_sprite.visible = false
+				obj_sprite.visible = true
+				obj_sprite.texture = tex_barn
+				obj_sprite.scale = Vector2(1.25, 1.25)
+				obj_sprite.offset = Vector2(0, -58)
+				obj_sprite.modulate = Color.WHITE
+				node.z_index = gx + gy + 2 - 2 * GameData.MEADOW_MIN
+				badge.position = Vector2(-70, -225)
+				badge.text = "Red Barn [Storage]"
+				badge.modulate = Color(1.0, 0.92, 0.65, 1.0)
 		
 		"grass":
 			soil_sprite.visible = false

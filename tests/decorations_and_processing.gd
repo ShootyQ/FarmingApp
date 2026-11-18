@@ -313,6 +313,38 @@ func _test_ui_modals_and_placement_mode(game_state, game_data):
 	_assert(main_scene.music_btn.text == "Music: OFF", "Music button displays 'Music: OFF'")
 	main_scene.music_btn.pressed.emit()
 	_assert(game_state.music_enabled, "Tapping music button unmutes music")
-	_assert(main_scene.music_btn.text == "Music: ON", "Music button returns to 'Music: ON'")
+	# Test Roofs ON/OFF Flatten Buildings feature
+	_assert(main_scene.toggle_buildings_btn != null, "Toggle buildings button exists in HUD")
+	_assert(not main_scene.buildings_flattened, "Buildings flattened starts false")
+	_assert(main_scene.toggle_buildings_btn.text == "Roofs: ON", "Toggle buildings button starts as 'Roofs: ON'")
+	
+	# Before flattening: roof click intercepts click
+	_assert(main_scene._get_building_at_local_pos(barn_pos + Vector2(0, -60)) == "barn", "Before flattening, roof area chooses barn")
+	
+	# Toggle flattening ON
+	main_scene.toggle_buildings_btn.pressed.emit()
+	_assert(main_scene.buildings_flattened, "Buildings flattened is now true")
+	_assert(main_scene.toggle_buildings_btn.text == "Roofs: OFF", "Toggle button now says 'Roofs: OFF'")
+	
+	# When flattened: roof space DOES NOT choose barn, leaving tiles behind accessible
+	var roof_click_flattened = main_scene._get_building_at_local_pos(barn_pos + Vector2(0, -60))
+	_assert(roof_click_flattened == "", "When flattened, roof space does not intercept clicks (got '%s')" % roof_click_flattened)
+	
+	# Ground 2x2 foundation footprint STILL chooses barn
+	var foot_click_flattened = main_scene._get_building_at_local_pos(barn_pos + Vector2(0, 30))
+	_assert(foot_click_flattened == "barn", "When flattened, 2x2 ground footprint still chooses barn")
+	
+	# Origin plot node sprite is hidden, foundation is visible
+	var barn_origin_idx = game_data.get_farm_index(Vector2i(0, 0))
+	var barn_origin_node = main_scene.plot_nodes[barn_origin_idx]
+	_assert(not barn_origin_node.get_node("ObjectSprite").visible, "Barn sprite is hidden when roofs are flattened")
+	_assert(barn_origin_node.get_node("Foundation").visible, "Barn foundation polygon is visible when roofs are flattened")
+	
+	# Toggle flattening OFF (restore roofs)
+	main_scene.toggle_buildings_btn.pressed.emit()
+	_assert(not main_scene.buildings_flattened, "Buildings flattened toggled back to false")
+	_assert(main_scene.toggle_buildings_btn.text == "Roofs: ON", "Toggle button restored to 'Roofs: ON'")
+	_assert(barn_origin_node.get_node("ObjectSprite").visible, "Barn sprite is restored when roofs are ON")
+	_assert(not barn_origin_node.get_node("Foundation").visible, "Barn foundation polygon is hidden when roofs are ON")
 	
 	main_scene.queue_free()
